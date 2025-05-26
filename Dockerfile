@@ -21,4 +21,4 @@ WORKDIR /app
 ARG GITHUB_RUN_NUMBER
 ENV GITHUB_RUN_NUMBER=$GITHUB_RUN_NUMBER
 COPY --from=publish /app/publish .
-ENTRYPOINT dotnet OrgAI.dll
+ENTRYPOINT ["dotnet", "OrgAI.dll"]
