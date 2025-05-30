@@ -105,4 +105,11 @@ public static class BlobService
       .SelectMany(g => g.Value.Reviewers, (g, r) => new { ReviewerEmail = r, GroupName = g.Key })
       .ToLookup(o => o.ReviewerEmail, o => o.GroupName, StringComparer.OrdinalIgnoreCase);
   }
+
+  public static async Task UpdateUsersAsync(string csvContent)
+  {
+    ArgumentNullException.ThrowIfNull(csvContent);
+    var blob = configClient.GetBlobClient("users.csv");
+    await blob.UploadAsync(new BinaryData(csvContent), true);
+  }
 }

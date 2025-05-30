@@ -122,6 +122,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * `Organisation__CountryCode` - your country code, e.g. `GB` for Great Britain (used for localised web search)
     * `Organisation__City` - your city name (used for localised web search)
     * `Organisation__Timezone` - your timezone, e.g. `Europe/London` (used for localised web search)
+    * `Organisation__SyncApiKey` - a secret key to be used when updating the `users.csv` file with an automated script (optional)
     * `Azure__ClientId` - the client ID of your Azure app registration
     * `Azure__TenantId` - your Azure tenant ID
     * `Azure__StorageAccountName` - the name of your Azure Storage account

@@ -9,4 +9,5 @@ public class Organisation
   public string CountryCode { get; init; }
   public string City { get; init; }
   public string Timezone { get; init; }
+  public string SyncApiKey { get; init; }
 }

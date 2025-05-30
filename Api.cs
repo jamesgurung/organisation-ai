@@ -298,6 +298,19 @@ public static class Api
       await BlobService.LoadConfigAsync();
       return Results.Content("Refreshed presets.", "text/plain");
     });
+
+    app.MapPut("/api/users", [AllowAnonymous] async (HttpContext context) =>
+    {
+      if (string.IsNullOrEmpty(Organisation.Instance.SyncApiKey)) return Results.Conflict("A sync API key is not configured.");
+      if (!context.Request.Headers.TryGetValue("X-Api-Key", out var apiKey) || apiKey != Organisation.Instance.SyncApiKey) return Results.Unauthorized();
+      if (!context.Request.ContentType.StartsWith("text/csv", StringComparison.OrdinalIgnoreCase)) return Results.BadRequest("Content type must be text/csv.");
+      using var reader = new StreamReader(context.Request.Body);
+      var csvData = await reader.ReadToEndAsync();
+      if (string.IsNullOrWhiteSpace(csvData)) return Results.BadRequest("CSV data cannot be empty.");
+      await BlobService.UpdateUsersAsync(csvData);
+      await BlobService.LoadConfigAsync();
+      return Results.NoContent();
+    });
   }
 
   private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int webSearchCount = 0, int fileSearchCount = 0)
