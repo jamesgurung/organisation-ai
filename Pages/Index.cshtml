@@ -84,8 +84,7 @@
     </div>
 
     <div id="chat-container">
-      <div id="chat-content-container">
-      </div>
+      <div id="chat-content-container"></div>
     </div>
 
     <div id="long-chat-warning" style="display: none">
@@ -107,6 +106,10 @@
           <span class="material-symbols-rounded">send</span>
         </button>
       </form>
+      <div id="voice-area" style="display: none">
+        <button id="speak">Start</button>
+        <button id="restart-speak" style="display: none">New Conversation</button>
+      </div>
     </div>
   </div>
 </div>
@@ -134,6 +137,7 @@
   <script src="/js/history.js"></script>
   <script src="/js/chat.js"></script>
   <script src="/js/streaming.js"></script>
+  <script src="/js/speech.js"></script>
   } else {
   <script src="/js/site.js"></script>
   }

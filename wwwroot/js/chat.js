@@ -318,9 +318,11 @@ async function resizeFile(file) {
   return new File([blob], file.name, { type: file.type });
 }
 
-function showTypingIndicator() {
+function showTypingIndicator(isUser) {
+  removeTypingIndicator();
   const indicator = document.createElement('div');
   indicator.id = 'typing-indicator';
+  if (isUser) indicator.className = 'user';
   for (let i = 0; i < 3; i++) {
     const dot = document.createElement('span');
     indicator.appendChild(dot);
@@ -329,9 +331,9 @@ function showTypingIndicator() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-function removeTypingIndicator() {
+function removeTypingIndicator(isUser) {
   const indicator = document.getElementById('typing-indicator');
-  if (indicator) {
+  if (indicator && (!isUser || indicator.className === 'user')) {
     indicator.remove();
   }
 }

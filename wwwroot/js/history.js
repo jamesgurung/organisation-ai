@@ -65,6 +65,10 @@ async function loadChat(chatId, user, group) {
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
   conversation.turns.forEach(turn => { addMessageToUI(turn); });
   if (window.innerWidth <= 768) sidebar.classList.remove('open');
+  if (conversation.preset.voice) {
+    speakBtn.style.display = 'none';
+    restartSpeakBtn.style.display = 'inline-block';
+  }
   if (user) {
     userElement.textContent = `User: ${user}`;
     userElement.style.display = 'block';

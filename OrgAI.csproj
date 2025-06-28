@@ -10,10 +10,10 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Data.Tables" Version="12.11.0" />
-    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Blobs" Version="1.5.0" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.25.0-beta.1" />
+    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Blobs" Version="1.5.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.26.0-beta.1" />
     <PackageReference Include="LigerShark.WebOptimizer.Core" Version="3.0.436" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0-preview.4.25258.110" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0-preview.5.25277.114" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1-Preview.1" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" Version="3.0.71" />
     <PackageReference Include="OpenAI" Version="2.2.0-beta.4" />

@@ -7,6 +7,8 @@ public class OpenAIModelConfig
   public decimal CostPer1MCachedInputTokens { get; init; }
   public decimal CostPer1MOutputTokens { get; init; }
   public decimal? CostPer1KWebSearches { get; init; }
+  public decimal? CostPer1MAudioInputTokens { get; init; }
+  public decimal? CostPer1MAudioOutputTokens { get; init; }
 }
 
 public class OpenAIConfig

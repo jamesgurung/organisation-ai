@@ -64,4 +64,6 @@ public class Preset
   public bool WebSearchEnabled { get; set; }
   [JsonPropertyName("vectorStoreId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string VectorStoreId { get; set; }
+  [JsonPropertyName("voice"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string Voice { get; set; }
 }

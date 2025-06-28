@@ -16,11 +16,12 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
 * Web search capabilities
 * Understanding of uploaded images
 * Document search using vector stores
+* Voice-to-voice conversations
 * Chat history
 * Automated content moderation and manual review
 * Configurable weekly spend limits
 * Usage and cost dashboard
-* Support for all screen sizes, including mobile
+* Support for all screen sizes including mobile
 * Single sign-on (SSO) using Microsoft 365
 
 ### Setup
@@ -59,7 +60,8 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "temperature": 0.2,
           "reasoningEffort": null,
           "webSearchEnabled": false,
-          "vectorStoreId": null
+          "vectorStoreId": null,
+          "voice": null
         }
       ],
       "reviewers": [ "reviewer@example.com" ],
@@ -91,6 +93,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         * `reasoningEffort` (optional) - the reasoning effort to use, where supported by the model
         * `webSearchEnabled` (optional) - whether web searches are enabled
         * `vectorStoreId` (optional) - the ID of the OpenAI vector store to use for this preset
+        * `voice` (optional) - when set, this enables speech-to-speech mode using the specified voice
     * `reviewers` - an array of users to give reviewer access, which allows them to retrospectively review all AI conversations in this group
     * `reviewThreshold` - how certain the moderation model must be that a message is inappropriate before adding it to the queue for manual review (set this to 0 if you wish to review all messages)
     * `showPresetDetails` - whether to show the preset details, such as the system instructions and model name, to the user

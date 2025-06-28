@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Azure;
+using Microsoft.Extensions.Hosting;
 using OpenAI.Moderations;
 using OpenAI.Responses;
 using System.ClientModel;
@@ -38,7 +40,7 @@ public static class Api
       var spend = await TableService.GetSpendAsync(userEmail);
       if (spend >= userGroup.UserMaxWeeklySpend) return Results.StatusCode(429);
 
-      Task<ClientResult<OpenAIResponse>> summaryTask = null;
+      Task<SummaryResponse> summaryTask = null;
       Conversation conversation = null;
       ConversationEntity conversationEntity = null;
 
@@ -64,29 +66,16 @@ public static class Api
 
         var moderationPrompt = string.IsNullOrEmpty(preset.Title) ? prompt : $"{preset.Title}:{MessageDelimeter}{prompt}";
         var moderationResult = await moderationClient.ClassifyTextAsync(moderationPrompt);
-        moderationScore = typeof(ModerationResult).GetProperties().Select(p => p.GetValue(moderationResult.Value)).OfType<ModerationCategory>()
-          .Max(cat => cat.Flagged ? cat.Score : 0);
+        moderationScore = moderationResult.Value.GetScore();
 
         if (moderationScore >= userGroup.ModerationThreshold)
         {
           conversationEntity = new ConversationEntity(userEmail, id, $"{FlagIcon} Content flagged", 0m);
           await TableService.UpsertConversationAsync(conversationEntity);
         }
+        else
         {
-          var summaryClient = new OpenAIResponseClient(OpenAIConfig.Instance.TitleSummarisationModel, userGroup.ApiKey);
-          var summaryOptions = new ResponseCreationOptions
-          {
-            EndUserId = id,
-            Instructions = "The user will post a prompt. Do NOT respond to the prompt.\n\n" +
-              "**Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title.**\n\n" +
-              "The first word MUST start with a capital letter, and then use sentence case. Do not use punctuation. Prefer short words. " +
-              "Try to capture the full context of the query, not just the task category. " +
-              "Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).",
-            Temperature = 0,
-            StoredOutputEnabled = false
-          };
-          var summaryPrompt = string.IsNullOrEmpty(preset.Title) ? prompt : $"{preset.Title}: {prompt}";
-          summaryTask = summaryClient.CreateResponseAsync(summaryPrompt, summaryOptions);
+          summaryTask = SummariseAsync(preset.Title, prompt, id, userGroup.ApiKey);
         }
       }
       else
@@ -107,8 +96,7 @@ public static class Api
         var pastConversation = string.Join(MessageDelimeter, conversation.Turns.Where(o => o.Role == "user").Select(turn => turn.Text));
         var moderationTitle = string.IsNullOrEmpty(conversation.Preset.Title) ? string.Empty : $"{conversation.Preset.Title}:{MessageDelimeter}";
         var moderationResult = await moderationClient.ClassifyTextAsync(moderationTitle + pastConversation + MessageDelimeter + prompt);
-        moderationScore = typeof(ModerationResult).GetProperties().Select(p => p.GetValue(moderationResult.Value)).OfType<ModerationCategory>()
-          .Max(cat => cat.Flagged ? cat.Score : 0);
+        moderationScore = moderationResult.Value.GetScore();
         if (moderationScore >= userGroup.ModerationThreshold)
         {
           conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
@@ -216,9 +204,8 @@ public static class Api
               if (isFirstTurn)
               {
                 var summaryResponse = await summaryTask;
-                var title = string.Join(' ', summaryResponse.Value.GetOutputText().Split(' ', 5, StringSplitOptions.RemoveEmptyEntries).Take(4)).Trim('*');
-                cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Value.Usage);
-                conversationEntity = new ConversationEntity(userEmail, id, title, cost);
+                cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+                conversationEntity = new ConversationEntity(userEmail, id, summaryResponse.Title, cost);
               }
               else
               {
@@ -276,10 +263,21 @@ public static class Api
     group.MapDelete("/conversations/{id}", [Authorize] async (string id, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      var conversationEntity = await TableService.GetConversationAsync(userEmail, id);
-      if (conversationEntity.IsDeleted) return Results.NotFound("Conversation not found.");
-      conversationEntity.IsDeleted = true;
-      await TableService.UpsertConversationAsync(conversationEntity);
+      var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
+      var userGroup = UserGroup.ConfigByGroupName[userGroupName];
+      var isReviewer = userGroup.Reviewers.Contains(userEmail);
+      if (isReviewer)
+      {
+        await TableService.DeleteConversationAsync(userEmail, id);
+        await BlobService.DeleteConversationAsync(id);
+      }
+      else
+      {
+        var conversationEntity = await TableService.GetConversationAsync(userEmail, id);
+        if (conversationEntity.IsDeleted) return Results.NotFound("Conversation not found.");
+        conversationEntity.IsDeleted = true;
+        await TableService.UpsertConversationAsync(conversationEntity);
+      }
       return Results.NoContent();
     });
 
@@ -299,6 +297,115 @@ public static class Api
       return Results.Content("Refreshed presets.", "text/plain");
     });
 
+    group.MapGet("/token", [Authorize] async ([FromQuery] string presetId, HttpContext context, IHttpClientFactory httpClientFactory) =>
+    {
+      var userEmail = context.User.Identity.Name;
+      var userGroup = UserGroup.ConfigByGroupName[UserGroup.GroupNameByUserEmail[userEmail]];
+
+      var spend = await TableService.GetSpendAsync(userEmail);
+      if (spend >= userGroup.UserMaxWeeklySpend) return Results.StatusCode(429);
+
+      if (string.IsNullOrEmpty(presetId) || !userGroup.PresetDictionary.TryGetValue(presetId, out var preset))
+      {
+        return Results.BadRequest("Invalid preset name.");
+      }
+
+      var client = httpClientFactory.CreateClient("OpenAI");
+      client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userGroup.ApiKey);
+      var request = new RealtimeSessionRequest
+      {
+        Model = preset.Model,
+        Voice = preset.Voice,
+        Instructions = preset.Instructions
+      };
+      var response = await client.PostAsJsonAsync("/v1/realtime/sessions", request);
+      var json = await response.Content.ReadAsStringAsync();
+      return Results.Content(json, "application/json");
+    });
+
+    group.MapPost("/record", [Authorize] async ([FromBody] RealtimeConversationEntry entry, HttpContext context) =>
+    {
+      var userEmail = context.User.Identity.Name;
+      var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
+      var userGroup = UserGroup.ConfigByGroupName[userGroupName];
+      var isReviewer = userGroup.Reviewers.Contains(userEmail);
+      var isFirstTurn = string.IsNullOrEmpty(entry.CurrentChatId);
+
+      if (entry is null) return Results.BadRequest("Entry cannot be null.");
+
+      var moderationClient = new ModerationClient("omni-moderation-latest", userGroup.ApiKey);
+      var moderationResult = await moderationClient.ClassifyTextAsync($"# User\n\n{entry.UserTranscript}\n\n# Assistant\n\n{entry.AssistantTranscript}");
+      var moderationScore = moderationResult.Value.GetScore();
+
+      string id = null;
+      string title = null;
+      decimal cost;
+      ConversationEntity conversationEntity = null;
+      Conversation conversation = null;
+      if (isFirstTurn)
+      {
+        id = Guid.NewGuid().ToString();
+        if (string.IsNullOrEmpty(entry.PresetId) || !userGroup.PresetDictionary.TryGetValue(entry.PresetId, out var preset))
+        {
+          return Results.BadRequest("Invalid preset name.");
+        }
+        if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(preset.Model, out var model))
+        {
+          return Results.BadRequest("Model not supported.");
+        }
+        cost = CalculateSpeechCost(model, entry);
+
+        if (moderationScore >= userGroup.ModerationThreshold)
+        {
+          title = $"{FlagIcon} Content flagged";
+        }
+        else
+        {
+          var summaryResponse = await SummariseAsync(null, entry.UserTranscript, id, userGroup.ApiKey);
+          cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+          title = summaryResponse.Title;
+        }
+        conversationEntity = new ConversationEntity(userEmail, id, title, cost);
+        await TableService.UpsertConversationAsync(conversationEntity);
+        conversation = new Conversation { Preset = preset };
+      }
+      else
+      {
+        id = entry.CurrentChatId;
+        conversationEntity = await TableService.GetConversationAsync(userEmail, id);
+        conversation = await BlobService.GetConversationAsync(id);
+        if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(conversation.Preset.Model, out var model))
+        {
+          return Results.BadRequest("Model not supported.");
+        }
+        cost = CalculateSpeechCost(model, entry);
+        var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
+        conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
+        if (moderationScore >= userGroup.ModerationThreshold)
+        {
+          conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
+        }
+        await TableService.UpsertConversationAsync(conversationEntity);
+      }
+
+      conversation.Turns.Add(new ConversationTurn { Role = "user", Text = entry.UserTranscript, Timestamp = DateTime.UtcNow });
+      conversation.Turns.Add(new ConversationTurn { Role = "assistant", Text = entry.AssistantTranscript, Timestamp = DateTime.UtcNow });
+      if (moderationScore >= userGroup.ModerationThreshold)
+      {
+        conversation.Turns.Add(new ConversationTurn { Role = "assistant", Text = FlagToken });
+      }
+      await BlobService.CreateOrUpdateConversationAsync(id, conversation);
+      var spend = await TableService.RecordSpendAsync(userEmail, cost, userGroupName);
+
+      return Results.Ok(new ChatResponse
+      {
+        Id = isFirstTurn ? id : null,
+        Title = isFirstTurn ? title : null,
+        SpendLimitReached = spend >= userGroup.UserMaxWeeklySpend,
+        Content = conversation.Turns[^1]
+      });
+    });
+
     app.MapPut("/api/users", [AllowAnonymous] async (HttpContext context) =>
     {
       if (string.IsNullOrEmpty(Organisation.Instance.SyncApiKey)) return Results.Conflict("A sync API key is not configured.");
@@ -313,15 +420,57 @@ public static class Api
     });
   }
 
+  private static float GetScore(this ModerationResult moderationResult)
+  {
+    return typeof(ModerationResult).GetProperties().Select(p => p.GetValue(moderationResult)).OfType<ModerationCategory>().Max(cat => cat.Flagged ? cat.Score : 0);
+  }
+
+  private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id, string apiKey)
+  {
+    var summaryClient = new OpenAIResponseClient(OpenAIConfig.Instance.TitleSummarisationModel, apiKey);
+    var summaryOptions = new ResponseCreationOptions
+    {
+      EndUserId = id,
+      Instructions = "The user will post a prompt. Do NOT respond to the prompt.\n\n" +
+        "**Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title.**\n\n" +
+        "The first word MUST start with a capital letter, and then use sentence case. Do not use punctuation. Prefer short words. " +
+        "Try to capture the full context of the query, not just the task category. " +
+        "Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).",
+      Temperature = 0,
+      StoredOutputEnabled = false
+    };
+    var summaryPrompt = string.IsNullOrEmpty(presetTitle) ? prompt : $"{presetTitle}: {prompt}";
+    var summaryResponse = await summaryClient.CreateResponseAsync(summaryPrompt, summaryOptions);
+    return new SummaryResponse
+    {
+      Title = string.Join(' ', summaryResponse.Value.GetOutputText().Split(' ', 5, StringSplitOptions.RemoveEmptyEntries).Take(4)).Trim('*'),
+      Usage = summaryResponse.Value.Usage
+    };
+  }
+
   private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int webSearchCount = 0, int fileSearchCount = 0)
   {
 #if DEBUG
     return 0;
 #else
-    return usage.InputTokenCount * model.CostPer1MInputTokens / 1_000_000m +
-           usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m +
-           webSearchCount * (model.CostPer1KWebSearches ?? 0) / 1000m +
-           fileSearchCount * OpenAIConfig.Instance.CostPer1KFileSearches / 1000m;
+    return (usage.InputTokenCount * model.CostPer1MInputTokens / 1_000_000m) +
+           (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
+           (webSearchCount * (model.CostPer1KWebSearches ?? 0) / 1000m) +
+           (fileSearchCount * OpenAIConfig.Instance.CostPer1KFileSearches / 1000m);
+#endif
+  }
+
+  private static decimal CalculateSpeechCost(OpenAIModelConfig model, RealtimeConversationEntry entry)
+  {
+#if DEBUG
+    return 0;
+#else
+    return (entry.InputTextTokens * model.CostPer1MInputTokens / 1_000_000m) +
+           (entry.InputAudioTokens * (model.CostPer1MAudioInputTokens ?? 0) / 1_000_000m) +
+           (entry.OutputTextTokens * model.CostPer1MOutputTokens / 1_000_000m) +
+           (entry.OutputAudioTokens * (model.CostPer1MAudioOutputTokens ?? 0) / 1_000_000m) +
+           (entry.CachedInputTextTokens * model.CostPer1MCachedInputTokens / 1_000_000m) +
+           (entry.CachedInputAudioTokens * model.CostPer1MCachedInputTokens / 1_000_000m);
 #endif
   }
 }
@@ -336,4 +485,10 @@ public class ChatResponse
   public bool SpendLimitReached { get; set; }
   [JsonPropertyName("content")]
   public ConversationTurn Content { get; set; }
+}
+
+public class SummaryResponse
+{
+  public string Title { get; set; }
+  public ResponseTokenUsage Usage { get; set; }
 }

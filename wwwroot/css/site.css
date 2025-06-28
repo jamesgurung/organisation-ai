@@ -602,6 +602,15 @@ button {
   margin-right: 0;
 }
 
+#typing-indicator.user {
+  background-color: var(--user-msg-bg);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 0;
+  align-self: flex-end;
+  margin-bottom: 20px;
+  border: 1px solid var(--user-msg-border);
+}
+
 @keyframes typing {
 
   0%,
@@ -1027,4 +1036,26 @@ button.resolve:disabled {
   text-align: right;
   opacity: 0;
   transition: opacity linear 0.2s;
+}
+
+#voice-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#speak, #restart-speak {
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: var(--bg-color);
+  border: none;
+  border-radius: 4px;
+  margin: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+#speak:disabled {
+  background-color: var(--placeholder-color);
+  cursor: default;
 }

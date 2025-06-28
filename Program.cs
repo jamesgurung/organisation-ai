@@ -35,6 +35,7 @@ builder.Services.Configure<JsonOptions>(options => { options.SerializerOptions.P
 builder.Services.AddRazorPages(options => { options.Conventions.AllowAnonymousToFolder("/auth"); });
 builder.Services.AddSingleton<IUserIdProvider, EmailUserIdProvider>();
 builder.Services.AddSignalR();
+builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = new Uri("https://api.openai.com"); });
 
 var minify = !builder.Environment.IsDevelopment();
 builder.Services.AddWebOptimizer(pipeline =>
@@ -44,7 +45,7 @@ builder.Services.AddWebOptimizer(pipeline =>
     pipeline.MinifyCssFiles("css/*.css");
     pipeline.MinifyJsFiles("js/*.js");
     pipeline.AddFiles("text/javascript", "lib/marked/lib/marked.umd.min.js", "lib/signalr/dist/browser/signalr.min.js", "lib/chart.js/dist/chart.umd.min.js");
-    pipeline.AddJavaScriptBundle("js/site.js", "js/main.js", "js/presets.js", "js/history.js", "js/chat.js", "js/streaming.js");
+    pipeline.AddJavaScriptBundle("js/site.js", "js/main.js", "js/presets.js", "js/history.js", "js/chat.js", "js/streaming.js", "js/speech.js");
   }
 });
 

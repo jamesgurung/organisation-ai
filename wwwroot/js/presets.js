@@ -32,6 +32,7 @@ function applyPreset(preset, isReviewing) {
   currentChatId = null;
   currentPreset = preset;
   instanceId = crypto.randomUUID();
+  stopRealtimeSpeech();
 
   if (showPresetDetails) {
     modelDisplay.textContent = currentPreset.model;
@@ -79,6 +80,17 @@ function applyPreset(preset, isReviewing) {
     messageDiv.className = 'message assistant-message';
     messageDiv.innerHTML = markdownToHtml(`# ${currentPreset.title}\n\n${currentPreset.introduction}`);
     chatContentContainer.appendChild(messageDiv);
+  }
+  if (currentPreset.voice) {
+    chatForm.style.display = 'none';
+    voiceArea.style.display = 'flex';
+    speakBtn.textContent = spendLimitReached ? 'Weekly limit reached.' : 'Start Voice Chat';
+    speakBtn.disabled = spendLimitReached;
+    speakBtn.style.display = 'inline-block';
+    restartSpeakBtn.style.display = 'none';
+  } else {
+    chatForm.style.display = 'flex';
+    voiceArea.style.display = 'none';
   }
   isScrolledToBottom = true;
   if (!isReviewing) {
