@@ -1,14 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Azure;
-using Microsoft.Extensions.Hosting;
 using OpenAI.Moderations;
 using OpenAI.Responses;
-using System.ClientModel;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+#pragma warning disable OPENAI001
 
 namespace OrgAI;
 
@@ -130,7 +129,7 @@ public static class Api
           else
           {
             userTurn.Files ??= [];
-            userTurn.Files.Add(new ConversationTurnFile { Content = base64Content, Filename = file.FileName });
+            userTurn.Files.Add(new ConversationTurnFile { Content = base64Content, Filename = file.FileName, Type = file.ContentType });
           }
         }
       }
@@ -166,7 +165,7 @@ public static class Api
         if (conversation.Preset.WebSearchEnabled && model.CostPer1KWebSearches is not null)
         {
           var org = Organisation.Instance;
-          var location = WebSearchToolLocation.CreateApproximateLocation(org.CountryCode, org.City, org.City, org.Timezone);
+          var location = WebSearchUserLocation.CreateApproximateLocation(org.CountryCode, org.City, org.City, org.Timezone);
           chatOptions.Tools.Add(ResponseTool.CreateWebSearchTool(location));
         }
         if (conversation.Preset.VectorStoreId is not null)
@@ -453,7 +452,8 @@ public static class Api
 #if DEBUG
     return 0;
 #else
-    return (usage.InputTokenCount * model.CostPer1MInputTokens / 1_000_000m) +
+    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
+           (usage.InputTokenDetails.CachedTokenCount * model.CostPer1MCachedInputTokens / 1_000_000m) +
            (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
            (webSearchCount * (model.CostPer1KWebSearches ?? 0) / 1000m) +
            (fileSearchCount * OpenAIConfig.Instance.CostPer1KFileSearches / 1000m);

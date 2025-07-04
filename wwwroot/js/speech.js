@@ -137,8 +137,10 @@ speakBtn.addEventListener('click', async () => {
     speakBtn.style.display = 'none';
     restartSpeakBtn.style.display = 'inline-block';
   } else {
+    speakBtn.disabled = true;
     speakBtn.textContent = 'Starting...';
     await startRealtimeSpeech();
+    speakBtn.disabled = false;
     speakBtn.textContent = 'Stop Voice Chat';
   }
 });

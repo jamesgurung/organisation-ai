@@ -1,6 +1,8 @@
 ﻿using OpenAI.Responses;
 using System.Text.Json.Serialization;
 
+#pragma warning disable OPENAI001
+
 namespace OrgAI;
 
 public class Conversation
@@ -27,7 +29,7 @@ public class Conversation
           foreach (var file in turn.Files ?? [])
           {
             var content = new BinaryData(Convert.FromBase64String(file.Content));
-            parts.Add(ResponseContentPart.CreateInputFilePart(null, file.Filename, content));
+            parts.Add(ResponseContentPart.CreateInputFilePart(content, file.Type, file.Filename));
           }
           parts.Add(ResponseContentPart.CreateInputTextPart(turn.Text));
           items.Add(ResponseItem.CreateUserMessageItem(parts));
@@ -71,4 +73,6 @@ public class ConversationTurnFile
   public string Content { get; set; }
   [JsonPropertyName("filename")]
   public string Filename { get; set; }
+  [JsonPropertyName("type")]
+  public string Type { get; set; }
 }
