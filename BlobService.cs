@@ -79,7 +79,8 @@ public static class BlobService
               Id = preset.Id,
               Title = preset.Title,
               Category = preset.Category,
-              Introduction = preset.Introduction
+              Introduction = preset.Introduction,
+              Voice = preset.Voice
             });
           }
           userGroup.PresetJson = JsonSerializer.Serialize(redactedPresets);
