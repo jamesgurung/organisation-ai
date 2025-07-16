@@ -155,7 +155,7 @@ public static class TableService
     return userSpend.HasValue ? decimal.Parse(userSpend.Value.Spent, CultureInfo.InvariantCulture) : 0m;
   }
 
-  public static async Task<List<SpendEntity>> GetUsageDataAsync(List<string> userGroups)
+  public static async Task<List<SpendEntity>> GetUsageDataAsync(IList<string> userGroups)
   {
     var filters = userGroups.Select(g => TableClient.CreateQueryFilter($"UserGroup eq {g}"));
     var filter = string.Join(" or ", filters);
