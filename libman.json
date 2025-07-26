@@ -4,15 +4,7 @@
   "libraries": [
     {
       "provider": "jsdelivr",
-      "library": "@microsoft/signalr@8.0.7",
-      "destination": "wwwroot/lib/signalr/",
-      "files": [
-        "dist/browser/signalr.min.js"
-      ]
-    },
-    {
-      "provider": "jsdelivr",
-      "library": "marked@15.0.11",
+      "library": "marked@16.1.1",
       "destination": "wwwroot/lib/marked/",
       "files": [
         "lib/marked.umd.min.js"
@@ -20,7 +12,7 @@
     },
     {
       "provider": "jsdelivr",
-      "library": "chart.js@4.4.9",
+      "library": "chart.js@4.5.0",
       "destination": "wwwroot/lib/chart.js/",
       "files": [
         "dist/chart.umd.min.js"

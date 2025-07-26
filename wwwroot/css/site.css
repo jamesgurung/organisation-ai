@@ -920,7 +920,6 @@ message a:visited {
 
 .file-icon {
   width: 100px;
-  height: 100px;
   background-color: var(--file-icon-bg);
   border-radius: 4px;
   display: flex;

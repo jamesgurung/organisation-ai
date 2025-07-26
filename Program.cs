@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.SignalR;
 using OrgAI;
 using System.Text.Json;
 
@@ -25,6 +24,7 @@ BlobService.Configure(connectionString);
 Organisation.Instance = builder.Configuration.GetSection("Organisation").Get<Organisation>();
 OpenAIConfig.Instance = builder.Configuration.GetSection("OpenAI").Get<OpenAIConfig>();
 
+Api.Configure();
 await BlobService.LoadConfigAsync();
 
 builder.ConfigureAuth();
@@ -33,9 +33,9 @@ builder.Services.AddAntiforgery(options => { options.HeaderName = "X-XSRF-TOKEN"
 builder.Services.Configure<RouteOptions>(options => { options.LowercaseUrls = true; });
 builder.Services.Configure<JsonOptions>(options => { options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; });
 builder.Services.AddRazorPages(options => { options.Conventions.AllowAnonymousToFolder("/auth"); });
-builder.Services.AddSingleton<IUserIdProvider, EmailUserIdProvider>();
-builder.Services.AddSignalR();
-builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = new Uri("https://api.openai.com"); });
+
+var openAiEndpoint = OpenAIConfig.Instance.AIFoundryEndpoint.Split('.')[0] + ".openai.azure.com";
+builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = new Uri(openAiEndpoint); });
 
 var minify = !builder.Environment.IsDevelopment();
 builder.Services.AddWebOptimizer(pipeline =>
@@ -44,7 +44,7 @@ builder.Services.AddWebOptimizer(pipeline =>
   {
     pipeline.MinifyCssFiles("css/*.css");
     pipeline.MinifyJsFiles("js/*.js");
-    pipeline.AddFiles("text/javascript", "lib/marked/lib/marked.umd.min.js", "lib/signalr/dist/browser/signalr.min.js", "lib/chart.js/dist/chart.umd.min.js");
+    pipeline.AddFiles("text/javascript", "lib/marked/lib/marked.umd.min.js", "lib/chart.js/dist/chart.umd.min.js");
     pipeline.AddJavaScriptBundle("js/site.js", "js/main.js", "js/presets.js", "js/history.js", "js/chat.js", "js/streaming.js", "js/speech.js");
   }
 });
@@ -82,7 +82,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapHub<ChatHub>("/hub");
 app.MapRazorPages();
 app.MapAuthPaths();
 app.MapApiPaths();

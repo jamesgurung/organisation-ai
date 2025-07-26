@@ -1,7 +1,6 @@
 {
   "allowUploads": false,
   "introMessage": "**Please select an AI tool from the menu.**\n\nThis service is for educational purposes only. All messages are recorded and monitored.\n\nDo not submit personal information.",
-  "moderationThreshold": 0.5,
   "presets": [
     {
       "id": "socratic",
@@ -14,7 +13,6 @@
     }
   ],
   "reviewers": [ "reviewer@example.com" ],
-  "reviewThreshold": 0,
   "showPresetDetails": false,
   "stopCommands": [
     {

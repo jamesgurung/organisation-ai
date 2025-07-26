@@ -68,11 +68,9 @@ async function chat(prompt, files) {
     currentResponseText = '';
     currentResponseElement = null;
     searchStatusElement = null;
-    const originalInstanceId = instanceId;
     
     const formData = new FormData();
     formData.append('prompt', prompt);
-    formData.append('instanceId', originalInstanceId);
     if (currentChatId === null) formData.append('presetId', currentPreset.id);
     else formData.append('id', currentChatId);
     if (files) files.forEach(file => { formData.append('files', file); });
@@ -81,21 +79,8 @@ async function chat(prompt, files) {
     removeTypingIndicator();
     
     if (response.ok) {
-      const data = await response.json();
-      spendLimitReached = data.spendLimitReached;
-      if (originalInstanceId !== instanceId) return;
-      if (currentChatId === null) {
-        currentChatId = data.id;
-        const conversationEntity = { id: currentChatId, title: data.title };
-        history.unshift(conversationEntity);
-        const historyItem = createHistoryItem(conversationEntity);
-        historyContainer.insertBefore(historyItem, historyContainer.firstChild);
-      }
-      if (currentResponseElement === null) {
-        currentResponseElement = addMessageToUI(data.content);
-      } else {
-        wrapTables(currentResponseElement);
-      }
+      await streamResponse(response);
+      wrapTables(currentResponseElement);
       if (chatContentContainer.querySelectorAll('.user-message').length >= 6) {
         longChatWarning.style.display = 'block';
         scrollChatContainer();

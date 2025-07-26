@@ -15,13 +15,13 @@ async function startRealtimeSpeech() {
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   peerConnection.addTrack(micStream.getTracks()[0]);
 
-  const dataChannel = peerConnection.createDataChannel('oai-events');
+  const dataChannel = peerConnection.createDataChannel('realtime-channel');
   dataChannel.addEventListener('message', (e) => { handleRealtimeSpeechEvent(JSON.parse(e.data)); });
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
-  const sdpResponse = await fetch(`https://api.openai.com/v1/realtime?model=${currentPreset.model}`, {
+  const sdpResponse = await fetch(`https://swedencentral.realtimeapi-preview.ai.azure.com/v1/realtimertc?model=${currentPreset.model}`, {
     method: 'POST',
     body: offer.sdp,
     headers: { Authorization: `Bearer ${client_secret.value}`, 'Content-Type': 'application/sdp' },
@@ -49,10 +49,13 @@ function stopRealtimeSpeech() {
 
 let audioUserTranscript = '';
 let audioAssistantTranscript = '';
+let assistantHasResponded = false;
 
 async function handleRealtimeSpeechEvent(data) {
+  console.log(data);
   switch (data.type) {
     case 'input_audio_buffer.speech_started':
+      assistantHasResponded = false;
       removeTypingIndicator();
       if (audioAssistantTranscript) {
         addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
@@ -64,7 +67,7 @@ async function handleRealtimeSpeechEvent(data) {
       removeTypingIndicator(true);
       audioUserTranscript = data.transcript;
       addMessageToUI({ role: 'user', text: audioUserTranscript });
-      showTypingIndicator();
+      if (!assistantHasResponded) showTypingIndicator();
       break;
     case 'response.done':
       audioAssistantTranscript = data.response.output[0]?.content[0]?.transcript;
@@ -75,6 +78,10 @@ async function handleRealtimeSpeechEvent(data) {
       const inputTextTokens = data.response.usage.input_token_details.text_tokens - cachedInputTextTokens;
       const outputAudioTokens = data.response.usage.output_token_details.audio_tokens;
       const outputTextTokens = data.response.usage.output_token_details.text_tokens;
+
+      while (!audioUserTranscript) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
 
       const response = await fetch('/api/record', {
         method: 'POST',
@@ -120,8 +127,14 @@ async function handleRealtimeSpeechEvent(data) {
         speakBtn.style.display = 'none';
         restartSpeakBtn.style.display = 'inline-block';
       }
+      if (data.response.status === 'failed') {
+        removeTypingIndicator();
+        addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
+        audioAssistantTranscript = '';
+      }
       break;
     case 'output_audio_buffer.stopped':
+      assistantHasResponded = true;
       removeTypingIndicator();
       if (audioAssistantTranscript) {
         addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });

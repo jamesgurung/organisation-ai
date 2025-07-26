@@ -58,12 +58,6 @@
           <span class="material-symbols-rounded">emoji_objects</span>
           <span class="setting-value" id="reasoning-display"></span>
         </div>
-        <div id="setting-item-web-search" class="setting-item" title="Web search is enabled">
-          <span class="material-symbols-rounded">language</span>
-        </div>
-        <div id="setting-item-file-search" class="setting-item" title="This assistant has access to a document store">
-          <span class="material-symbols-rounded">database_search</span>
-        </div>
         <div class="setting-item">
           <span class="material-symbols-rounded info-icon" id="system-prompt-icon" title="Click to view the model instructions">info</span>
           <div id="system-prompt-popup">
@@ -118,7 +112,6 @@
 
 @section Scripts {
   <script src="/lib/marked/lib/marked.umd.min.js"></script>
-  <script src="/lib/signalr/dist/browser/signalr.min.js"></script>
   <script>
     const antiforgeryToken = '@(Antiforgery.GetAndStoreTokens(HttpContext).RequestToken)';
     const presets = @Html.Raw(userGroup.PresetJson);

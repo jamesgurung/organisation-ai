@@ -20,18 +20,12 @@ public class UserGroup
   public IList<Preset> Presets { get; set; }
   [JsonPropertyName("userMaxWeeklySpend")]
   public decimal UserMaxWeeklySpend { get; init; }
-  [JsonPropertyName("moderationThreshold")]
-  public float ModerationThreshold { get; init; }
-  [JsonPropertyName("reviewThreshold")]
-  public float ReviewThreshold { get; init; }
   [JsonPropertyName("reviewers")]
   public IList<string> Reviewers { get; set; }
   [JsonIgnore]
   public Dictionary<string, Preset> PresetDictionary { get; set; }
   [JsonIgnore]
   public string PresetJson { get; set; }
-  [JsonIgnore]
-  public string ApiKey { get; set; }
 }
 
 public class StopCommand
@@ -60,10 +54,6 @@ public class Preset
   public decimal? Temperature { get; set; }
   [JsonPropertyName("reasoningEffort"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string ReasoningEffort { get; set; }
-  [JsonPropertyName("webSearchEnabled"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-  public bool WebSearchEnabled { get; set; }
-  [JsonPropertyName("vectorStoreId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-  public string VectorStoreId { get; set; }
   [JsonPropertyName("voice"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string Voice { get; set; }
 }

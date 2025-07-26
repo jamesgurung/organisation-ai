@@ -1,9 +1,10 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using Azure;
+using Azure.AI.OpenAI;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
-using OpenAI.Moderations;
 using OpenAI.Responses;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -15,14 +16,19 @@ public static class Api
 {
   public const string FlagToken = "[FLAG]";
   public const string FlagIcon = "\uD83D\uDEA9";
-  private const string MessageDelimeter = "\n\n---\n\n";
+
+  private static AzureOpenAIClient _azureClient;
+
+  public static void Configure()
+  {
+    _azureClient = new AzureOpenAIClient(new Uri(OpenAIConfig.Instance.AIFoundryEndpoint), new AzureKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey));
+  }
 
   public static void MapApiPaths(this WebApplication app)
   {
     var group = app.MapGroup("/api").ValidateAntiforgery();
 
-    group.MapPost("/chat", [Authorize] async ([FromForm] string id, [FromForm] string presetId, [FromForm] string prompt, [FromForm] IFormFileCollection files,
-      [FromForm] string instanceId, HttpContext context, IHubContext<ChatHub, IChatClient> hubContext) =>
+    group.MapPost("/chat", [Authorize] async ([FromForm] string id, [FromForm] string presetId, [FromForm] string prompt, [FromForm] IFormFileCollection files, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
       var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
@@ -30,7 +36,6 @@ public static class Api
       var isReviewer = userGroup.Reviewers.Contains(userEmail);
       var isFirstTurn = string.IsNullOrEmpty(id);
 
-      if (string.IsNullOrEmpty(instanceId)) return Results.BadRequest("Instance ID cannot be empty.");
       if (string.IsNullOrEmpty(prompt)) return Results.BadRequest("Prompt cannot be empty.");
       if (files is not null && files.Count > 3) return Results.BadRequest("Too many files.");
       if (files is not null && files.Any(file => file.Length > 10 * 1024 * 1024)) return Results.BadRequest("File size exceeds 10 MB.");
@@ -42,9 +47,6 @@ public static class Api
       Task<SummaryResponse> summaryTask = null;
       Conversation conversation = null;
       ConversationEntity conversationEntity = null;
-
-      var moderationClient = new ModerationClient("omni-moderation-latest", userGroup.ApiKey);
-      float moderationScore;
 
       if (isFirstTurn)
       {
@@ -60,22 +62,8 @@ public static class Api
         }
 
         conversation = new Conversation { Preset = preset };
-
         id = Guid.NewGuid().ToString();
-
-        var moderationPrompt = string.IsNullOrEmpty(preset.Title) ? prompt : $"{preset.Title}:{MessageDelimeter}{prompt}";
-        var moderationResult = await moderationClient.ClassifyTextAsync(moderationPrompt);
-        moderationScore = moderationResult.Value.GetScore();
-
-        if (moderationScore >= userGroup.ModerationThreshold)
-        {
-          conversationEntity = new ConversationEntity(userEmail, id, $"{FlagIcon} Content flagged", 0m);
-          await TableService.UpsertConversationAsync(conversationEntity);
-        }
-        else
-        {
-          summaryTask = SummariseAsync(preset.Title, prompt, id, userGroup.ApiKey);
-        }
+        summaryTask = SummariseAsync(preset.Title, prompt, id);
       }
       else
       {
@@ -92,22 +80,11 @@ public static class Api
         {
           return Results.BadRequest("Cannot continue a conversation that has been flagged.");
         }
-        var pastConversation = string.Join(MessageDelimeter, conversation.Turns.Where(o => o.Role == "user").Select(turn => turn.Text));
-        var moderationTitle = string.IsNullOrEmpty(conversation.Preset.Title) ? string.Empty : $"{conversation.Preset.Title}:{MessageDelimeter}";
-        var moderationResult = await moderationClient.ClassifyTextAsync(moderationTitle + pastConversation + MessageDelimeter + prompt);
-        moderationScore = moderationResult.Value.GetScore();
-        if (moderationScore >= userGroup.ModerationThreshold)
-        {
-          conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
-          await TableService.UpsertConversationAsync(conversationEntity);
-        }
       }
-
       if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(conversation.Preset.Model, out var model))
       {
         return Results.BadRequest("Model not supported.");
       }
-
       var userTurn = new ConversationTurn
       {
         Role = "user",
@@ -136,103 +113,124 @@ public static class Api
       conversation.Turns.Add(userTurn);
       var spendLimitReached = false;
 
-      if (moderationScore >= userGroup.ModerationThreshold)
+      var hasTemp = conversation.Preset.Temperature is not null;
+      var chatClient = _azureClient.GetOpenAIResponseClient(model.Name);
+      var chatOptions = new ResponseCreationOptions
       {
-        conversation.Turns.Add(new() { Role = "assistant", Text = FlagToken });
-        var updateBlobTask = BlobService.CreateOrUpdateConversationAsync(id, conversation);
-        var reviewTask = isReviewer ? Task.CompletedTask : TableService.UpsertReviewEntityAsync(conversationEntity, userGroupName);
-        await Task.WhenAll(updateBlobTask, reviewTask);
-      }
-      else
+        EndUserId = id,
+        Instructions = conversation.Preset.Instructions,
+        Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
+        TopP = (hasTemp && conversation.Preset.Temperature < 0.4m) ? 0.9f : null,
+        ReasoningOptions = conversation.Preset.ReasoningEffort switch
+        {
+          "low" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Low },
+          "medium" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Medium },
+          "high" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.High },
+          _ => null
+        },
+        StoredOutputEnabled = false
+      };
+
+      var responseItems = conversation.AsResponseItems();
+      var responseStream = chatClient.CreateResponseStreamingAsync(responseItems, chatOptions);
+
+      return Results.Stream(async outputStream =>
       {
-        var hasTemp = conversation.Preset.Temperature is not null;
-        var chatClient = new OpenAIResponseClient(model.Name, userGroup.ApiKey);
-        var chatOptions = new ResponseCreationOptions
-        {
-          EndUserId = id,
-          Instructions = conversation.Preset.Instructions,
-          Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
-          TopP = (hasTemp && conversation.Preset.Temperature < 0.4m) ? 0.9f : null,
-          ReasoningOptions = conversation.Preset.ReasoningEffort switch
-          {
-            "low" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Low },
-            "medium" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Medium },
-            "high" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.High },
-            _ => null
-          },
-          StoredOutputEnabled = false
-        };
-        if (conversation.Preset.WebSearchEnabled && model.CostPer1KWebSearches is not null)
-        {
-          var org = Organisation.Instance;
-          var location = WebSearchUserLocation.CreateApproximateLocation(org.CountryCode, org.City, org.City, org.Timezone);
-          chatOptions.Tools.Add(ResponseTool.CreateWebSearchTool(location));
-        }
-        if (conversation.Preset.VectorStoreId is not null)
-        {
-          chatOptions.Tools.Add(ResponseTool.CreateFileSearchTool([conversation.Preset.VectorStoreId], 10));
-        }
-
-        var streamer = hubContext.Clients.User(userEmail);
-        var responseItems = conversation.AsResponseItems();
-        var responseStream = chatClient.CreateResponseStreamingAsync(responseItems, chatOptions);
-
         await foreach (var update in responseStream)
         {
+          Console.WriteLine(update);
           switch (update)
           {
             case StreamingResponseOutputTextDeltaUpdate text:
-              await streamer.Append(text.Delta, instanceId);
+              await StreamText(text.Delta);
               break;
-            case StreamingResponseWebSearchCallInProgressUpdate:
-              await streamer.Append("[web_search_in_progress]", instanceId);
+            case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
+              await StreamText(":::[reasoning_in_progress]:::");
               break;
-            case StreamingResponseWebSearchCallCompletedUpdate:
-              await streamer.Append("[web_search_completed]", instanceId);
+            case StreamingResponseOutputItemDoneUpdate item when item.Item is ReasoningResponseItem:
+              await StreamText(":::[reasoning_completed]:::");
               break;
             case StreamingResponseFileSearchCallSearchingUpdate:
-              await streamer.Append("[file_search_in_progress]", instanceId);
+              await StreamText(":::[file_search_in_progress]:::");
               break;
             case StreamingResponseFileSearchCallCompletedUpdate:
-              await streamer.Append("[file_search_completed]", instanceId);
+              await StreamText(":::[file_search_completed]:::");
+              break;
+            case StreamingResponseWebSearchCallInProgressUpdate:
+              await StreamText(":::[web_search_in_progress]:::");
+              break;
+            case StreamingResponseWebSearchCallCompletedUpdate:
+              await StreamText(":::[web_search_in_progress]:::");
               break;
             case StreamingResponseCompletedUpdate completion:
-              conversation.Turns.Add(new() { Role = "assistant", Text = completion.Response.GetOutputText() });
-              var cost = CalculateCost(model, completion.Response.Usage, completion.Response.OutputItems.Count(item => item is WebSearchCallResponseItem),
-                completion.Response.OutputItems.Count(item => item is FileSearchCallResponseItem));
-              if (isFirstTurn)
-              {
-                var summaryResponse = await summaryTask;
-                cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
-                conversationEntity = new ConversationEntity(userEmail, id, summaryResponse.Title, cost);
-              }
-              else
-              {
-                var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
-                conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
-              }
-              var updateBlobTask = BlobService.CreateOrUpdateConversationAsync(id, conversation);
-              var recordSpendTask = TableService.RecordSpendAsync(userEmail, cost, userGroupName);
-              var updateEntityTask = TableService.UpsertConversationAsync(conversationEntity);
-              var reviewTask = moderationScore >= userGroup.ReviewThreshold && !isReviewer
-                ? TableService.UpsertReviewEntityAsync(conversationEntity, userGroupName)
-                : Task.CompletedTask;
-              await Task.WhenAll(recordSpendTask, updateBlobTask, updateEntityTask, reviewTask);
-              spendLimitReached = (await recordSpendTask) >= userGroup.UserMaxWeeklySpend;
+              await FinishStreamAsync(completion.Response.GetOutputText(), completion.Response.Usage, completion.Response.OutputItems);
+              break;
+            case StreamingResponseIncompleteUpdate filtered:
+              await FinishStreamAsync(FlagToken, filtered.Response.Usage, filtered.Response.OutputItems);
               break;
             default:
               break;
           }
         }
-      }
 
-      return Results.Ok(new ChatResponse
-      {
-        Id = isFirstTurn ? id : null,
-        Title = isFirstTurn ? conversationEntity.Title : null,
-        SpendLimitReached = spendLimitReached,
-        Content = conversation.Turns[^1]
-      });
+        async Task StreamText(string text)
+        {
+          await outputStream.WriteAsync(Encoding.UTF8.GetBytes(text));
+          await outputStream.FlushAsync();
+        }
+
+        async Task FinishStreamAsync(string text, ResponseTokenUsage usage, IList<ResponseItem> items)
+        {
+          conversation.Turns.Add(new() { Role = "assistant", Text = text });
+          var cost = CalculateCost(model, usage, items.Count(item => item is FileSearchCallResponseItem));
+          if (isFirstTurn)
+          {
+            string title;
+            if (text == FlagToken)
+            {
+              title = $"{FlagIcon} Content flagged";
+            }
+            else
+            {
+              var summaryResponse = await summaryTask;
+              cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+              title = summaryResponse.Title;
+            }
+            conversationEntity = new ConversationEntity(userEmail, id, title, cost);
+          }
+          else
+          {
+            var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
+            conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
+            if (text == FlagToken)
+            {
+              conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
+            }
+          }
+          var updateBlobTask = BlobService.CreateOrUpdateConversationAsync(id, conversation);
+          var recordSpendTask = TableService.RecordSpendAsync(userEmail, cost, userGroupName);
+          var updateEntityTask = TableService.UpsertConversationAsync(conversationEntity);
+          var reviewTask = isReviewer
+            ? Task.CompletedTask
+            : TableService.UpsertReviewEntityAsync(conversationEntity, userGroupName);
+          await Task.WhenAll(recordSpendTask, updateBlobTask, updateEntityTask, reviewTask);
+          spendLimitReached = (await recordSpendTask) >= userGroup.UserMaxWeeklySpend;
+
+          if (isFirstTurn)
+          {
+            await outputStream.WriteAsync(Encoding.UTF8.GetBytes($":::[conversation={id};{conversationEntity.Title}]:::"));
+          }
+          if (text == FlagToken)
+          {
+            await outputStream.WriteAsync(Encoding.UTF8.GetBytes($":::[flagged]:::"));
+          }
+          if (spendLimitReached)
+          {
+            await outputStream.WriteAsync(Encoding.UTF8.GetBytes($":::[spend_limit_reached]:::"));
+          }
+          await outputStream.FlushAsync();
+        }
+      }, "text/plain; charset=utf-8");
     });
 
     group.MapGet("/conversations/{id}", [Authorize] async (string id, HttpContext context) =>
@@ -310,14 +308,14 @@ public static class Api
       }
 
       var client = httpClientFactory.CreateClient("OpenAI");
-      client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userGroup.ApiKey);
+      client.DefaultRequestHeaders.Add("api-key", OpenAIConfig.Instance.AIFoundryApiKey);
       var request = new RealtimeSessionRequest
       {
         Model = preset.Model,
         Voice = preset.Voice,
         Instructions = preset.Instructions
       };
-      var response = await client.PostAsJsonAsync("/v1/realtime/sessions", request);
+      var response = await client.PostAsJsonAsync("/openai/realtimeapi/sessions?api-version=2025-04-01-preview", request);
       var json = await response.Content.ReadAsStringAsync();
       return Results.Content(json, "application/json");
     });
@@ -331,10 +329,6 @@ public static class Api
       var isFirstTurn = string.IsNullOrEmpty(entry.CurrentChatId);
 
       if (entry is null) return Results.BadRequest("Entry cannot be null.");
-
-      var moderationClient = new ModerationClient("omni-moderation-latest", userGroup.ApiKey);
-      var moderationResult = await moderationClient.ClassifyTextAsync($"# User\n\n{entry.UserTranscript}\n\n# Assistant\n\n{entry.AssistantTranscript}");
-      var moderationScore = moderationResult.Value.GetScore();
 
       string id = null;
       string title = null;
@@ -354,16 +348,10 @@ public static class Api
         }
         cost = CalculateSpeechCost(model, entry);
 
-        if (moderationScore >= userGroup.ModerationThreshold)
-        {
-          title = $"{FlagIcon} Content flagged";
-        }
-        else
-        {
-          var summaryResponse = await SummariseAsync(null, entry.UserTranscript, id, userGroup.ApiKey);
-          cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
-          title = summaryResponse.Title;
-        }
+        var summaryResponse = await SummariseAsync(null, entry.UserTranscript, id);
+        cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+        title = summaryResponse.Title;
+
         conversationEntity = new ConversationEntity(userEmail, id, title, cost);
         await TableService.UpsertConversationAsync(conversationEntity);
         conversation = new Conversation { Preset = preset };
@@ -380,19 +368,11 @@ public static class Api
         cost = CalculateSpeechCost(model, entry);
         var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
         conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
-        if (moderationScore >= userGroup.ModerationThreshold)
-        {
-          conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
-        }
         await TableService.UpsertConversationAsync(conversationEntity);
       }
 
       conversation.Turns.Add(new ConversationTurn { Role = "user", Text = entry.UserTranscript, Timestamp = DateTime.UtcNow });
       conversation.Turns.Add(new ConversationTurn { Role = "assistant", Text = entry.AssistantTranscript, Timestamp = DateTime.UtcNow });
-      if (moderationScore >= userGroup.ModerationThreshold)
-      {
-        conversation.Turns.Add(new ConversationTurn { Role = "assistant", Text = FlagToken });
-      }
       await BlobService.CreateOrUpdateConversationAsync(id, conversation);
       var spend = await TableService.RecordSpendAsync(userEmail, cost, userGroupName);
 
@@ -419,14 +399,9 @@ public static class Api
     });
   }
 
-  private static float GetScore(this ModerationResult moderationResult)
+  private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id)
   {
-    return typeof(ModerationResult).GetProperties().Select(p => p.GetValue(moderationResult)).OfType<ModerationCategory>().Max(cat => cat.Flagged ? cat.Score : 0);
-  }
-
-  private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id, string apiKey)
-  {
-    var summaryClient = new OpenAIResponseClient(OpenAIConfig.Instance.TitleSummarisationModel, apiKey);
+    var summaryClient = _azureClient.GetOpenAIResponseClient(OpenAIConfig.Instance.TitleSummarisationModel);
     var summaryOptions = new ResponseCreationOptions
     {
       EndUserId = id,
@@ -447,7 +422,7 @@ public static class Api
     };
   }
 
-  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int webSearchCount = 0, int fileSearchCount = 0)
+  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int fileSearchCount = 0)
   {
 #if DEBUG
     return 0;
@@ -455,7 +430,6 @@ public static class Api
     return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * model.CostPer1MCachedInputTokens / 1_000_000m) +
            (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
-           (webSearchCount * (model.CostPer1KWebSearches ?? 0) / 1000m) +
            (fileSearchCount * OpenAIConfig.Instance.CostPer1KFileSearches / 1000m);
 #endif
   }

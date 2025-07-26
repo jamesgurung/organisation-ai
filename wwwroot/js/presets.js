@@ -31,7 +31,6 @@ async function displayPresets() {
 function applyPreset(preset, isReviewing) {
   currentChatId = null;
   currentPreset = preset;
-  instanceId = crypto.randomUUID();
   stopRealtimeSpeech();
 
   if (showPresetDetails) {
@@ -40,8 +39,6 @@ function applyPreset(preset, isReviewing) {
     settingItemTemp.style.display = hasTemperature ? 'flex' : 'none';
     tempDisplay.textContent = currentPreset.temperature?.toFixed(1) ?? '';
     settingItemReasoning.style.display = currentPreset.reasoningEffort ? 'flex' : 'none';
-    settingItemWebSearch.style.display = currentPreset.webSearchEnabled ? 'flex' : 'none';
-    settingItemFileSearch.style.display = currentPreset.vectorStoreId ? 'flex' : 'none';
     reasoningDisplay.textContent = currentPreset.reasoningEffort ?? '';
     instructionsDiv = instructionsPopup.querySelector('div');
     instructionsDiv.textContent = currentPreset.instructions;
