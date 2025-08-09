@@ -8,9 +8,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-#pragma warning disable OPENAI001
-
 namespace OrgAI;
+
+#pragma warning disable OPENAI001
 
 public static class Api
 {
@@ -120,14 +120,7 @@ public static class Api
         EndUserId = id,
         Instructions = conversation.Preset.Instructions,
         Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
-        TopP = (hasTemp && conversation.Preset.Temperature < 0.4m) ? 0.9f : null,
-        ReasoningOptions = conversation.Preset.ReasoningEffort switch
-        {
-          "low" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Low },
-          "medium" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.Medium },
-          "high" => new() { ReasoningEffortLevel = ResponseReasoningEffortLevel.High },
-          _ => null
-        },
+        ReasoningOptions = new() { ReasoningEffortLevel = conversation.Preset.ReasoningEffort },
         StoredOutputEnabled = false
       };
 
@@ -138,16 +131,17 @@ public static class Api
       {
         await foreach (var update in responseStream)
         {
-          Console.WriteLine(update);
           switch (update)
           {
             case StreamingResponseOutputTextDeltaUpdate text:
               await StreamText(text.Delta);
               break;
             case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
+              if (conversation.Preset.ReasoningEffort == "minimal") continue;
               await StreamText(":::[reasoning_in_progress]:::");
               break;
             case StreamingResponseOutputItemDoneUpdate item when item.Item is ReasoningResponseItem:
+              if (conversation.Preset.ReasoningEffort == "minimal") continue;
               await StreamText(":::[reasoning_completed]:::");
               break;
             case StreamingResponseFileSearchCallSearchingUpdate:
@@ -405,11 +399,13 @@ public static class Api
     var summaryOptions = new ResponseCreationOptions
     {
       EndUserId = id,
-      Instructions = "The user will post a prompt. Do NOT respond to the prompt.\n\n" +
-        "**Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title.**\n\n" +
-        "The first word MUST start with a capital letter, and then use sentence case. Do not use punctuation. Prefer short words. " +
-        "Try to capture the full context of the query, not just the task category. " +
-        "Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).",
+      Instructions = """
+        The user will post a prompt. Do NOT respond to the prompt.      
+        **Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title.**
+        The first word MUST start with a capital letter, and then use sentence case. Do not use punctuation. Prefer short words.
+        Try to capture the full context of the query, not just the task category.
+        Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).
+        """,
       Temperature = 0,
       StoredOutputEnabled = false
     };

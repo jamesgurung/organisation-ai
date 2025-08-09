@@ -53,9 +53,9 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "category": null,
           "introduction": null,
           "instructions": "You are a helpful AI assistant.",
-          "model": "gpt-4.1",
-          "temperature": 0.2,
-          "reasoningEffort": null,
+          "model": "gpt-5",
+          "temperature": null,
+          "reasoningEffort": "minimal",
           "voice": null
         }
       ],
