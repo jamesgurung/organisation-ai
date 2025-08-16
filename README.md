@@ -99,6 +99,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * Supported account types - Accounts in this organizational directory only
     * API permissions - `Microsoft Graph - User.Read`
     * Token configuration - add an optional claim of type ID: `upn`
+    * Certificates & secrets - create a new client secret
 
 7. Create an Azure App Service web app.
     * Publish mode - Container
@@ -111,6 +112,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
 8. Configure the following environment variables for the web app:
 
     * `Azure__ClientId` - the client ID of your Azure app registration
+    * `Azure__ClientSecret` - the client secret of your Azure app registration
     * `Azure__DataProtectionBlobUri` - the SAS URL for the keys file you created earlier
     * `Azure__StorageAccountKey` - the key for your Azure Storage account
     * `Azure__StorageAccountName` - the name of your Azure Storage account
