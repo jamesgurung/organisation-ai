@@ -32,15 +32,29 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
 
 3. Within the `config` blob container, upload a blank file `keys.xml`. Generate a SAS URL for this file with read/write permissions and a distant expiry. This will be used to store the application's data protection keys so that auth cookies persist across app restarts.
 
+4. Within the `config` blob container, create a file `models.json` with the following format. Each model name needs to match a deployment in your Azure AI Foundry project.
 
-4. Within the `config` blob container, create a file `users.csv` with the following format:
+    ```json
+    [
+      {
+        "name": "gpt-5",
+        "costPer1MInputTokens": 1.38,
+        "costPer1MCachedInputTokens": 0.14,
+        "costPer1MAudioInputTokens": null,
+        "costPer1MOutputTokens": 11.00,
+        "costPer1MAudioOutputTokens": null
+      }
+    ]
+    ```
+
+5. Within the `config` blob container, create a file `users.csv` with the following format:
 
     ```csv
     Email,UserGroup
     test@example.com,staff
     ```
 
-5. For each user group configured in `users.csv`, create a file `<usergroup>.json` with the following format:
+6. For each user group configured in `users.csv`, create a file `<usergroup>.json` with the following format:
 
     ```json
     {
@@ -92,7 +106,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         * `message` - the warning to display to the user, in Markdown format
     * `userMaxWeeklySpend` - the amount each user is allowed to spend per week; resets Sundays (OpenAI token usage is retrospective, so users might slightly exceed the limit before restrictions apply)
  
-6. Create an Azure app registration.
+7. Create an Azure app registration.
     * Name - `Organisation AI`
     * Redirect URI - `https://<app-website-domain>/signin-oidc`
     * Implicit grant - ID tokens
@@ -101,7 +115,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * Token configuration - add an optional claim of type ID: `upn`
     * Certificates & secrets - create a new client secret
 
-7. Create an Azure App Service web app.
+8. Create an Azure App Service web app.
     * Publish mode - Container
     * Operating system - Linux
     * Image source - Other container registries
@@ -109,7 +123,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * Image and tag - `jamesgurung/organisation-ai:latest`
     * Startup command: (blank)
 
-8. Configure the following environment variables for the web app:
+9. Configure the following environment variables for the web app:
 
     * `Azure__ClientId` - the client ID of your Azure app registration
     * `Azure__ClientSecret` - the client secret of your Azure app registration
@@ -119,14 +133,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * `Azure__TenantId` - your Azure tenant ID
     * `OpenAI__AIFoundryApiKey` - the API key for your Azure AI Foundry project
     * `OpenAI__AIFoundryEndpoint` - the endpoint URL for your Azure AI Foundry deployment, e.g. `https://<project>.cognitiveservices.azure.com/`
-    * `OpenAI__CostPer1KFileSearches` - the OpenAI credit cost per 1K file searches
-    * `OpenAI__Models__0__Name` - the name of the Azure AI Foundry OpenAI deployment you would like to make available, e.g. `gpt-4.1` (subsequent models can be configured by adding additional items with incrementing indices)
-    * `OpenAI__Models__0__CostPer1MAudioInputTokens` - the model cost per 1M audio input tokens (where applicable)
-    * `OpenAI__Models__0__CostPer1MAudioOutputTokens` - the model cost per 1M audio output tokens (where applicable)
-    * `OpenAI__Models__0__CostPer1MCachedInputTokens` - the model cost per 1M cached input tokens
-    * `OpenAI__Models__0__CostPer1MInputTokens` - the model cost per 1M input tokens
-    * `OpenAI__Models__0__CostPer1MOutputTokens` - the model cost per 1M output tokens
-    * `OpenAI__TitleSummarisationModel` - the deployment which will be used to summarise titles, e.g. `gpt-4.1-mini`
+    * `OpenAI__TitleSummarisationModel` - the deployment which will be used to summarise titles, e.g. `gpt-5-mini`
     * `Organisation__AppWebsite` - the host name where this app will be hosted, e.g. `example.com`
     * `Organisation__Name` - the name of your organisation
     * `Organisation__SyncApiKey` - a secret key to be used when updating the `users.csv` file with an automated script (optional)

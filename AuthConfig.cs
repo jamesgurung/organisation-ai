@@ -52,7 +52,7 @@ public static class AuthConfig
           }
         };
       })
-      .AddOpenIdConnect("Microsoft", "Microsoft", o =>
+      .AddOpenIdConnect("Microsoft", o =>
       {
         o.Authority = $"https://login.microsoftonline.com/{builder.Configuration["Azure:TenantId"]}/v2.0/";
         o.ClientId = builder.Configuration["Azure:ClientId"];

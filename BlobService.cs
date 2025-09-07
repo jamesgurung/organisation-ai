@@ -15,6 +15,7 @@ public static class BlobService
 
   private static BlobContainerClient conversationsClient;
   private static BlobContainerClient configClient;
+  private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
   public static async Task CreateOrUpdateConversationAsync(string conversationId, Conversation conversation)
   {
@@ -103,6 +104,10 @@ public static class BlobService
     UserGroup.GroupNamesByReviewerEmail = UserGroup.ConfigByGroupName
       .SelectMany(g => g.Value.Reviewers, (g, r) => new { ReviewerEmail = r, GroupName = g.Key })
       .ToLookup(o => o.ReviewerEmail, o => o.GroupName, StringComparer.OrdinalIgnoreCase);
+
+    var modelsData = await configClient.GetBlobClient("models.json").DownloadContentAsync();
+    var models = JsonSerializer.Deserialize<List<OpenAIModelConfig>>(modelsData.Value.Content.ToString(), _jsonOptions);
+    OpenAIConfig.Instance.Models = models.ToDictionary(m => m.Name, m => m);
   }
 
   public static async Task UpdateUsersAsync(string csvContent)

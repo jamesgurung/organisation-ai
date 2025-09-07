@@ -81,7 +81,7 @@ public static class Api
           return Results.BadRequest("Cannot continue a conversation that has been flagged.");
         }
       }
-      if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(conversation.Preset.Model, out var model))
+      if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
       {
         return Results.BadRequest("Model not supported.");
       }
@@ -187,7 +187,7 @@ public static class Api
             else
             {
               var summaryResponse = await summaryTask;
-              cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+              cost += CalculateCost(OpenAIConfig.Instance.Models[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
               title = summaryResponse.Title;
             }
             conversationEntity = new ConversationEntity(userEmail, id, title, cost);
@@ -336,14 +336,14 @@ public static class Api
         {
           return Results.BadRequest("Invalid preset name.");
         }
-        if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(preset.Model, out var model))
+        if (!OpenAIConfig.Instance.Models.TryGetValue(preset.Model, out var model))
         {
           return Results.BadRequest("Model not supported.");
         }
         cost = CalculateSpeechCost(model, entry);
 
         var summaryResponse = await SummariseAsync(null, entry.UserTranscript, id);
-        cost += CalculateCost(OpenAIConfig.Instance.ModelDictionary[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
+        cost += CalculateCost(OpenAIConfig.Instance.Models[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
         title = summaryResponse.Title;
 
         conversationEntity = new ConversationEntity(userEmail, id, title, cost);
@@ -355,7 +355,7 @@ public static class Api
         id = entry.CurrentChatId;
         conversationEntity = await TableService.GetConversationAsync(userEmail, id);
         conversation = await BlobService.GetConversationAsync(id);
-        if (!OpenAIConfig.Instance.ModelDictionary.TryGetValue(conversation.Preset.Model, out var model))
+        if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
         {
           return Results.BadRequest("Model not supported.");
         }
@@ -401,12 +401,12 @@ public static class Api
       EndUserId = id,
       Instructions = """
         The user will post a prompt. Do NOT respond to the prompt.      
-        **Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title.**
+        **Summarise it as succinctly as possible, in 3 words or less, for use as a conversation title in the UI.**
         The first word MUST start with a capital letter, and then use sentence case. Do not use punctuation. Prefer short words.
         Try to capture the full context of the query, not just the task category.
         Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).
         """,
-      Temperature = 0,
+      ReasoningOptions = new() { ReasoningEffortLevel = "minimal" },
       StoredOutputEnabled = false
     };
     var summaryPrompt = string.IsNullOrEmpty(presetTitle) ? prompt : $"{presetTitle}: {prompt}";

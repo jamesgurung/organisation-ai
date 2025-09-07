@@ -16,19 +16,6 @@ public class OpenAIConfig
 
   public string AIFoundryApiKey { get; set; }
   public string AIFoundryEndpoint { get; set; }
-
-  public decimal CostPer1KFileSearches { get; set; }
   public string TitleSummarisationModel { get; set; }
-
-  private IList<OpenAIModelConfig> _models;
-  public IList<OpenAIModelConfig> Models
-  {
-    get => _models;
-    set
-    {
-      _models = value;
-      ModelDictionary = _models.ToDictionary(m => m.Name, m => m);
-    }
-  }
-  public Dictionary<string, OpenAIModelConfig> ModelDictionary { get; set; }
+  public Dictionary<string, OpenAIModelConfig> Models { get; set; }
 }
