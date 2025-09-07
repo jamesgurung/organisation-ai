@@ -157,10 +157,10 @@ public static class Api
               await StreamText(":::[web_search_in_progress]:::");
               break;
             case StreamingResponseCompletedUpdate completion:
-              await FinishStreamAsync(completion.Response.GetOutputText(), completion.Response.Usage, completion.Response.OutputItems);
+              await FinishStreamAsync(completion.Response.GetOutputText(), completion.Response.Usage);
               break;
             case StreamingResponseIncompleteUpdate filtered:
-              await FinishStreamAsync(FlagToken, filtered.Response.Usage, filtered.Response.OutputItems);
+              await FinishStreamAsync(FlagToken, filtered.Response.Usage);
               break;
             default:
               break;
@@ -173,10 +173,10 @@ public static class Api
           await outputStream.FlushAsync();
         }
 
-        async Task FinishStreamAsync(string text, ResponseTokenUsage usage, IList<ResponseItem> items)
+        async Task FinishStreamAsync(string text, ResponseTokenUsage usage)
         {
           conversation.Turns.Add(new() { Role = "assistant", Text = text });
-          var cost = CalculateCost(model, usage, items.Count(item => item is FileSearchCallResponseItem));
+          var cost = CalculateCost(model, usage);
           if (isFirstTurn)
           {
             string title;
@@ -418,15 +418,14 @@ public static class Api
     };
   }
 
-  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int fileSearchCount = 0)
+  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage)
   {
 #if DEBUG
     return 0;
 #else
     return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * model.CostPer1MCachedInputTokens / 1_000_000m) +
-           (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
-           (fileSearchCount * OpenAIConfig.Instance.CostPer1KFileSearches / 1000m);
+           (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m);
 #endif
   }
 
