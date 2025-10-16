@@ -1,4 +1,4 @@
-ARG DOTNET_VERSION=10.0-preview
+ARG DOTNET_VERSION=10.0
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}-noble-chiseled-composite-extra AS base
 USER $APP_UID
