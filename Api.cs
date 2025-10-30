@@ -1,8 +1,8 @@
-﻿using Azure;
-using Azure.AI.OpenAI;
+﻿using Azure.AI.OpenAI;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OpenAI.Responses;
+using System.ClientModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +21,10 @@ public static class Api
 
   public static void Configure()
   {
-    _azureClient = new AzureOpenAIClient(new Uri(OpenAIConfig.Instance.AIFoundryEndpoint), new AzureKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey));
+    var endpoint = new Uri(OpenAIConfig.Instance.AIFoundryEndpoint);
+    var credential = new ApiKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey);
+    var options = new AzureOpenAIClientOptions { NetworkTimeout = TimeSpan.FromMinutes(10) };
+    _azureClient = new AzureOpenAIClient(endpoint, credential, options);
   }
 
   public static void MapApiPaths(this WebApplication app)
@@ -147,8 +150,7 @@ public static class Api
             continue;
           }
 
-          if (!await nextUpdateTask)
-            break;
+          if (!await nextUpdateTask) break;
 
           switch (responseEnumerator.Current)
           {
@@ -156,11 +158,11 @@ public static class Api
               await StreamText(text.Delta);
               break;
             case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
-              if (conversation.Preset.ReasoningEffort == "minimal") continue;
+              if (conversation.Preset.ReasoningEffort == "minimal") break;
               await StreamText(":::[reasoning_in_progress]:::");
               break;
             case StreamingResponseOutputItemDoneUpdate item when item.Item is ReasoningResponseItem:
-              if (conversation.Preset.ReasoningEffort == "minimal") continue;
+              if (conversation.Preset.ReasoningEffort == "minimal") break;
               await StreamText(":::[reasoning_completed]:::");
               break;
             case StreamingResponseFileSearchCallSearchingUpdate:
