@@ -55,6 +55,8 @@ function processChunk(chunk) {
     case '[flagged]':
       showStopMessage(currentResponseElement, stopCommands.find(o => o.token === '[FLAG]'));
       break;
+    case '[heartbeat]':
+      break;
     default:
       if (chunk.startsWith('[conversation=')) {
         currentChatId = chunk.substring(14, 50);

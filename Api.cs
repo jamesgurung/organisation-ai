@@ -129,9 +129,28 @@ public static class Api
 
       return Results.Stream(async outputStream =>
       {
-        await foreach (var update in responseStream)
+        var ct = context.RequestAborted;
+        using var heartbeat = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        await using var responseEnumerator = responseStream.GetAsyncEnumerator(ct);
+        var heartbeatTask = heartbeat.WaitForNextTickAsync(ct).AsTask();
+        var nextUpdateTask = responseEnumerator.MoveNextAsync().AsTask();
+
+        while (!ct.IsCancellationRequested)
         {
-          switch (update)
+          var completedTask = await Task.WhenAny(heartbeatTask, nextUpdateTask);
+
+          if (completedTask == heartbeatTask)
+          {
+            await heartbeatTask;
+            await StreamText(":::[heartbeat]:::");
+            heartbeatTask = heartbeat.WaitForNextTickAsync(ct).AsTask();
+            continue;
+          }
+
+          if (!await nextUpdateTask)
+            break;
+
+          switch (responseEnumerator.Current)
           {
             case StreamingResponseOutputTextDeltaUpdate text:
               await StreamText(text.Delta);
@@ -154,7 +173,7 @@ public static class Api
               await StreamText(":::[web_search_in_progress]:::");
               break;
             case StreamingResponseWebSearchCallCompletedUpdate:
-              await StreamText(":::[web_search_in_progress]:::");
+              await StreamText(":::[web_search_completed]:::");
               break;
             case StreamingResponseCompletedUpdate completion:
               await FinishStreamAsync(completion.Response.GetOutputText(), completion.Response.Usage);
@@ -165,12 +184,14 @@ public static class Api
             default:
               break;
           }
+
+          nextUpdateTask = responseEnumerator.MoveNextAsync().AsTask();
         }
 
         async Task StreamText(string text)
         {
-          await outputStream.WriteAsync(Encoding.UTF8.GetBytes(text));
-          await outputStream.FlushAsync();
+          await outputStream.WriteAsync(Encoding.UTF8.GetBytes(text), ct);
+          await outputStream.FlushAsync(ct);
         }
 
         async Task FinishStreamAsync(string text, ResponseTokenUsage usage)
