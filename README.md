@@ -37,7 +37,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     ```json
     [
       {
-        "name": "gpt-5",
+        "name": "gpt-5.1",
         "costPer1MInputTokens": 1.38,
         "costPer1MCachedInputTokens": 0.14,
         "costPer1MAudioInputTokens": null,
@@ -67,9 +67,9 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "category": null,
           "introduction": null,
           "instructions": "You are a helpful AI assistant.",
-          "model": "gpt-5",
+          "model": "gpt-5.1",
           "temperature": null,
-          "reasoningEffort": "minimal",
+          "reasoningEffort": "none",
           "voice": null
         }
       ],

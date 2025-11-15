@@ -158,11 +158,11 @@ public static class Api
               await StreamText(text.Delta);
               break;
             case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
-              if (conversation.Preset.ReasoningEffort == "minimal") break;
+              if (conversation.Preset.ReasoningEffort is "none" or "minimal") break;
               await StreamText(":::[reasoning_in_progress]:::");
               break;
             case StreamingResponseOutputItemDoneUpdate item when item.Item is ReasoningResponseItem:
-              if (conversation.Preset.ReasoningEffort == "minimal") break;
+              if (conversation.Preset.ReasoningEffort is "none" or "minimal") break;
               await StreamText(":::[reasoning_completed]:::");
               break;
             case StreamingResponseFileSearchCallSearchingUpdate:

@@ -38,7 +38,7 @@ function applyPreset(preset, isReviewing) {
     const hasTemperature = currentPreset.temperature !== undefined && currentPreset.temperature !== null;
     settingItemTemp.style.display = hasTemperature ? 'flex' : 'none';
     tempDisplay.textContent = currentPreset.temperature?.toFixed(1) ?? '';
-    const reasoning = currentPreset.reasoningEffort && currentPreset.reasoningEffort !== 'minimal';
+    const reasoning = currentPreset.reasoningEffort && currentPreset.reasoningEffort !== 'none' && currentPreset.reasoningEffort !== 'minimal';
     settingItemReasoning.style.display = reasoning ? 'flex' : 'none';
     reasoningDisplay.textContent = !reasoning || currentPreset.reasoningEffort == 'low' ? '' : currentPreset.reasoningEffort;
     instructionsDiv = instructionsPopup.querySelector('div');
