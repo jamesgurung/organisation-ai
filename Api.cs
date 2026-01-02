@@ -124,7 +124,8 @@ public static class Api
         Instructions = conversation.Preset.Instructions,
         Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
         ReasoningOptions = new() { ReasoningEffortLevel = conversation.Preset.ReasoningEffort },
-        StoredOutputEnabled = false
+        StoredOutputEnabled = false,
+        StreamingEnabled = true
       };
 
       var responseItems = conversation.AsResponseItems();
