@@ -18,11 +18,18 @@ async function displayPresets() {
     grouped[category].forEach(preset => {
       const presetItem = document.createElement('div');
       presetItem.className = 'chat-list-item';
+      presetItem.tabIndex = 0;
       const textDiv = document.createElement('div');
       textDiv.className = 'chat-list-item-text';
       textDiv.textContent = preset.title;
       presetItem.appendChild(textDiv);
       presetItem.addEventListener('click', () => applyPreset(preset, false));
+      presetItem.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          applyPreset(preset, false);
+        }
+      });
       presetsContainer.appendChild(presetItem);
     });
   });

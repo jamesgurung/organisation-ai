@@ -117,8 +117,8 @@ public static class Api
       var spendLimitReached = false;
 
       var hasTemp = conversation.Preset.Temperature is not null;
-      var chatClient = _azureClient.GetOpenAIResponseClient(model.Name);
-      var chatOptions = new ResponseCreationOptions
+      var chatClient = _azureClient.GetResponsesClient(model.Name);
+      var chatOptions = new CreateResponseOptions
       {
         EndUserId = id,
         Instructions = conversation.Preset.Instructions,
@@ -128,7 +128,11 @@ public static class Api
       };
 
       var responseItems = conversation.AsResponseItems();
-      var responseStream = chatClient.CreateResponseStreamingAsync(responseItems, chatOptions);
+      foreach (var responseItem in responseItems)
+      {
+        chatOptions.InputItems.Add(responseItem);
+      }
+      var responseStream = chatClient.CreateResponseStreamingAsync(chatOptions);
 
       return Results.Stream(async outputStream =>
       {
@@ -418,8 +422,8 @@ public static class Api
 
   private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id)
   {
-    var summaryClient = _azureClient.GetOpenAIResponseClient(OpenAIConfig.Instance.TitleSummarisationModel);
-    var summaryOptions = new ResponseCreationOptions
+    var summaryClient = _azureClient.GetResponsesClient(OpenAIConfig.Instance.TitleSummarisationModel);
+    var summaryOptions = new CreateResponseOptions
     {
       EndUserId = id,
       Instructions = """
@@ -433,7 +437,8 @@ public static class Api
       StoredOutputEnabled = false
     };
     var summaryPrompt = string.IsNullOrEmpty(presetTitle) ? prompt : $"{presetTitle}: {prompt}";
-    var summaryResponse = await summaryClient.CreateResponseAsync(summaryPrompt, summaryOptions);
+    summaryOptions.InputItems.Add(ResponseItem.CreateUserMessageItem(summaryPrompt));
+    var summaryResponse = await summaryClient.CreateResponseAsync(summaryOptions);
     return new SummaryResponse
     {
       Title = string.Join(' ', summaryResponse.Value.GetOutputText().Split(' ', 5, StringSplitOptions.RemoveEmptyEntries).Take(4)).Trim('*'),

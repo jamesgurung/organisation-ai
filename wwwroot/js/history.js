@@ -10,6 +10,7 @@ function createHistoryItem(conversationEntity) {
   const historyItem = document.createElement('div');
   historyItem.id = `chat-${conversationEntity.id}`;
   historyItem.className = `chat-list-item${conversationEntity.id === currentChatId ? ' active' : ''}`;
+  historyItem.tabIndex = 0;
 
   const textDiv = document.createElement('div');
   textDiv.className = 'chat-list-item-text';
@@ -26,6 +27,12 @@ function createHistoryItem(conversationEntity) {
 
   historyItem.appendChild(deleteBtn);
   historyItem.addEventListener('click', async () => await loadChat(conversationEntity.id, false));
+  historyItem.addEventListener('keydown', async (e) => {
+    if (e.target === historyItem && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      await loadChat(conversationEntity.id, false);
+    }
+  });
   return historyItem;
 }
 
@@ -43,6 +50,7 @@ function createReviewItem(reviewEntity) {
   reviewItem.dataset.user = reviewEntity.user;
   reviewItem.dataset.group = reviewEntity.group;
   reviewItem.className = 'chat-list-item';
+  reviewItem.tabIndex = 0;
 
   const textDiv = document.createElement('div');
   textDiv.className = 'chat-list-item-text';
@@ -50,6 +58,12 @@ function createReviewItem(reviewEntity) {
   reviewItem.appendChild(textDiv);
 
   reviewItem.addEventListener('click', async () => await loadChat(reviewEntity.id, reviewItem.dataset.user, reviewItem.dataset.group));
+  reviewItem.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      await loadChat(reviewEntity.id, reviewItem.dataset.user, reviewItem.dataset.group);
+    }
+  });
   return reviewItem;
 }
 
