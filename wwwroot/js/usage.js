@@ -45,12 +45,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const weeks = [...new Set(spendData.map(item => item.week))].sort();
     const groups = [...new Set(spendData.map(item => item.group))].sort();
 
-    weeks.forEach(week => {
+    const defaultStartIndex = Math.max(0, weeks.length - 26);
+
+    weeks.forEach((week, index) => {
       const dateString = "w/b " + new Date(week).toLocaleDateString();
       const startOption = document.createElement('option');
       startOption.value = week;
       startOption.textContent = dateString;
-      if (week === weeks[0]) startOption.selected = true;
+      if (index === defaultStartIndex) startOption.selected = true;
       startSelect.appendChild(startOption);
 
       const endOption = document.createElement('option');
@@ -68,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     filters.selectedGroup = 'all';
-    filters.selectedStart = weeks[0];
+    filters.selectedStart = weeks[defaultStartIndex];
     filters.selectedEnd = weeks[weeks.length - 1];
   };
 

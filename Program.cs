@@ -28,7 +28,7 @@ Api.Configure();
 await BlobService.LoadConfigAsync();
 
 builder.ConfigureAuth();
-builder.Services.AddResponseCompression();
+builder.Services.AddResponseCompression(options => { options.EnableForHttps = true; });
 builder.Services.AddAntiforgery(options => { options.HeaderName = "X-XSRF-TOKEN"; });
 builder.Services.Configure<RouteOptions>(options => { options.LowercaseUrls = true; });
 builder.Services.Configure<JsonOptions>(options => { options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; });
