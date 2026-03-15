@@ -1,6 +1,6 @@
-﻿using Azure.AI.OpenAI;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OpenAI;
 using OpenAI.Responses;
 using System.ClientModel;
 using System.Globalization;
@@ -10,21 +10,21 @@ using System.Text.Json.Serialization;
 
 namespace OrgAI;
 
-#pragma warning disable OPENAI001
-
 public static class Api
 {
   public const string FlagToken = "[FLAG]";
   public const string FlagIcon = "\uD83D\uDEA9";
 
-  private static AzureOpenAIClient _azureClient;
+  private static OpenAIClient _aiClient;
 
   public static void Configure()
   {
-    var endpoint = new Uri(OpenAIConfig.Instance.AIFoundryEndpoint);
-    var credential = new ApiKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey);
-    var options = new AzureOpenAIClientOptions { NetworkTimeout = TimeSpan.FromMinutes(10) };
-    _azureClient = new AzureOpenAIClient(endpoint, credential, options);
+    var clientOptions = new OpenAIClientOptions
+    {
+      NetworkTimeout = TimeSpan.FromMinutes(10),
+      Endpoint = new Uri($"{OpenAIConfig.Instance.AIFoundryEndpoint.TrimEnd('/')}/openai/v1/")
+    };
+    _aiClient = new OpenAIClient(new ApiKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey), clientOptions);
   }
 
   public static void MapApiPaths(this WebApplication app)
@@ -117,9 +117,10 @@ public static class Api
       var spendLimitReached = false;
 
       var hasTemp = conversation.Preset.Temperature is not null;
-      var chatClient = _azureClient.GetResponsesClient(model.Name);
+      var chatClient = _aiClient.GetResponsesClient();
       var chatOptions = new CreateResponseOptions
       {
+        Model = model.Name,
         EndUserId = id,
         Instructions = conversation.Preset.Instructions,
         Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
@@ -423,9 +424,10 @@ public static class Api
 
   private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id)
   {
-    var summaryClient = _azureClient.GetResponsesClient(OpenAIConfig.Instance.TitleSummarisationModel);
+    var summaryClient = _aiClient.GetResponsesClient();
     var summaryOptions = new CreateResponseOptions
     {
+      Model = OpenAIConfig.Instance.TitleSummarisationModel,
       EndUserId = id,
       Instructions = """
         The user will post a prompt. Do NOT respond to the prompt.      

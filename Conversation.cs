@@ -1,8 +1,6 @@
 ﻿using OpenAI.Responses;
 using System.Text.Json.Serialization;
 
-#pragma warning disable OPENAI001
-
 namespace OrgAI;
 
 public class Conversation
@@ -23,8 +21,8 @@ public class Conversation
           var parts = new List<ResponseContentPart>((turn.Images?.Count ?? 0) + (turn.Files?.Count ?? 0) + 1);
           foreach (var image in turn.Images ?? [])
           {
-            var content = new BinaryData(Convert.FromBase64String(image.Content));
-            parts.Add(ResponseContentPart.CreateInputImagePart(content, image.Type));
+            var uri = new Uri($"data:{image.Type};base64,{image.Content}");
+            parts.Add(ResponseContentPart.CreateInputImagePart(uri));
           }
           foreach (var file in turn.Files ?? [])
           {
