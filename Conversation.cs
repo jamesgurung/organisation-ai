@@ -33,6 +33,10 @@ public class Conversation
           items.Add(ResponseItem.CreateUserMessageItem(parts));
           break;
         case "assistant":
+          foreach (var reasoning in turn.EncryptedReasoningContent ?? [])
+          {
+            items.Add(new ReasoningResponseItem([]) { EncryptedContent = reasoning });
+          }
           if ((turn.Images?.Count ?? 0) == 0)
           {
             items.Add(ResponseItem.CreateAssistantMessageItem(turn.Text));
@@ -67,6 +71,8 @@ public class ConversationTurn
   public IList<ConversationTurnImage> Images { get; set; }
   [JsonPropertyName("files"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public IList<ConversationTurnFile> Files { get; set; }
+  [JsonPropertyName("encryptedReasoningContent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public IList<string> EncryptedReasoningContent { get; set; }
   [JsonPropertyName("timestamp"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public DateTime? Timestamp { get; set; }
 }

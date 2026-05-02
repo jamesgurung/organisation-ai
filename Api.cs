@@ -156,6 +156,7 @@ public static class Api
         StoredOutputEnabled = false,
         StreamingEnabled = true
       };
+      chatOptions.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
       if (conversation.Preset.WebSearch)
       {
         chatOptions.Tools.Add(ResponseTool.CreateWebSearchTool());
@@ -286,7 +287,18 @@ public static class Api
           {
             await StreamText($":::[image={image.Type};{image.Content}]:::");
           }
-          conversation.Turns.Add(new() { Role = "assistant", Text = text, Images = images.Count > 0 ? images : null });
+          var encryptedReasoningContent = response.OutputItems
+            .OfType<ReasoningResponseItem>()
+            .Select(o => o.EncryptedContent)
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .ToList();
+          conversation.Turns.Add(new()
+          {
+            Role = "assistant",
+            Text = text,
+            Images = images.Count > 0 ? images : null,
+            EncryptedReasoningContent = encryptedReasoningContent.Count > 0 ? encryptedReasoningContent : null
+          });
           var cost = manualImageCost + (manualImageCost > 0
             ? CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response))
             : images.Count > 0
