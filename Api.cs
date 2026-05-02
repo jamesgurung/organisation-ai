@@ -7,6 +7,7 @@ using System.ClientModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace OrgAI;
@@ -24,9 +25,21 @@ public static class Api
     var clientOptions = new OpenAIClientOptions
     {
       NetworkTimeout = TimeSpan.FromMinutes(10),
-      Endpoint = new Uri($"{OpenAIConfig.Instance.AIFoundryEndpoint.TrimEnd('/')}/openai/v1/")
+      Endpoint = new Uri(GetFoundryOpenAIEndpoint(), "/openai/v1/")
     };
     _aiClient = new OpenAIClient(new ApiKeyCredential(OpenAIConfig.Instance.AIFoundryApiKey), clientOptions);
+  }
+
+  public static Uri GetFoundryOpenAIEndpoint()
+  {
+    const string cognitiveServicesHostSuffix = ".cognitiveservices.azure.com";
+    var endpoint = new Uri(OpenAIConfig.Instance.AIFoundryEndpoint.TrimEnd('/'));
+    var endpointBuilder = new UriBuilder(endpoint) { Path = string.Empty, Query = string.Empty };
+    if (!endpoint.Host.EndsWith(cognitiveServicesHostSuffix, StringComparison.OrdinalIgnoreCase)) return endpointBuilder.Uri;
+
+    var resourceName = endpoint.Host[..^cognitiveServicesHostSuffix.Length];
+    endpointBuilder.Host = $"{resourceName}.openai.azure.com";
+    return endpointBuilder.Uri;
   }
 
   public static void MapApiPaths(this WebApplication app)
@@ -407,13 +420,22 @@ public static class Api
       client.DefaultRequestHeaders.Add("api-key", OpenAIConfig.Instance.AIFoundryApiKey);
       var request = new RealtimeSessionRequest
       {
-        Model = preset.Model,
-        Voice = preset.Voice,
-        Instructions = preset.Instructions
+        Session = new()
+        {
+          Model = preset.Model,
+          Instructions = preset.Instructions,
+          Audio = new() { Output = new() { Voice = preset.Voice } }
+        }
       };
-      var response = await client.PostAsJsonAsync("/openai/realtimeapi/sessions?api-version=2025-04-01-preview", request);
+      var response = await client.PostAsJsonAsync("/openai/v1/realtime/client_secrets", request);
       var json = await response.Content.ReadAsStringAsync();
-      return Results.Content(json, "application/json");
+      if (!response.IsSuccessStatusCode) return Results.Content(json, "application/json", statusCode: (int)response.StatusCode);
+
+      var tokenResponse = JsonNode.Parse(json)?.AsObject();
+      if (tokenResponse is null) return Results.Content(json, "application/json");
+
+      tokenResponse["realtime_endpoint"] = new Uri(client.BaseAddress, "/openai/v1/realtime/calls?webrtcfilter=on").ToString();
+      return Results.Json(tokenResponse);
     });
 
     group.MapPost("/record", [Authorize] async ([FromBody] RealtimeConversationEntry entry, HttpContext context) =>

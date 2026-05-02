@@ -4,7 +4,7 @@ async function displayPresets() {
   presetsContainer.innerHTML = '';
 
   const grouped = {};
-  presets.filter(preset => preset.id !== 'default').forEach(preset => {
+  presets.forEach(preset => {
     const cat = preset.category || 'Other';
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(preset);

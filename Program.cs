@@ -34,8 +34,7 @@ builder.Services.Configure<RouteOptions>(options => { options.LowercaseUrls = tr
 builder.Services.Configure<JsonOptions>(options => { options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; });
 builder.Services.AddRazorPages(options => { options.Conventions.AllowAnonymousToFolder("/auth"); });
 
-var openAiEndpoint = OpenAIConfig.Instance.AIFoundryEndpoint.Split('.')[0] + ".openai.azure.com";
-builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = new Uri(openAiEndpoint); });
+builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = Api.GetFoundryOpenAIEndpoint(); });
 
 var minify = !builder.Environment.IsDevelopment();
 builder.Services.AddWebOptimizer(pipeline =>

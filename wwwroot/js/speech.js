@@ -4,7 +4,8 @@ let speechInProgress = false;
 async function startRealtimeSpeech() {
   stopRealtimeSpeech();
   const tokenResponse = await fetch(`/api/token?presetId=${currentPreset.id}`);
-  const { client_secret } = await tokenResponse.json();
+  const tokenData = await tokenResponse.json();
+  const realtimeToken = tokenData.value ?? tokenData.client_secret?.value;
 
   peerConnection = new RTCPeerConnection();
 
@@ -21,10 +22,10 @@ async function startRealtimeSpeech() {
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
-  const sdpResponse = await fetch(`https://swedencentral.realtimeapi-preview.ai.azure.com/v1/realtimertc?model=${currentPreset.model}`, {
+  const sdpResponse = await fetch(tokenData.realtime_endpoint, {
     method: 'POST',
     body: offer.sdp,
-    headers: { Authorization: `Bearer ${client_secret.value}`, 'Content-Type': 'application/sdp' },
+    headers: { Authorization: `Bearer ${realtimeToken}`, 'Content-Type': 'application/sdp' },
   });
 
   await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
@@ -50,6 +51,7 @@ function stopRealtimeSpeech() {
 let audioUserTranscript = '';
 let audioAssistantTranscript = '';
 let assistantHasResponded = false;
+let assistantTranscriptDisplayed = false;
 
 async function handleRealtimeSpeechEvent(data) {
   console.log(data);
@@ -57,10 +59,9 @@ async function handleRealtimeSpeechEvent(data) {
     case 'input_audio_buffer.speech_started':
       assistantHasResponded = false;
       removeTypingIndicator();
-      if (audioAssistantTranscript) {
-        addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
-        audioAssistantTranscript = '';
-      }
+      showAssistantTranscript();
+      audioAssistantTranscript = '';
+      assistantTranscriptDisplayed = false;
       showTypingIndicator(true);
       break;
     case 'conversation.item.input_audio_transcription.completed':
@@ -69,8 +70,11 @@ async function handleRealtimeSpeechEvent(data) {
       addMessageToUI({ role: 'user', text: audioUserTranscript });
       if (!assistantHasResponded) showTypingIndicator();
       break;
+    case 'response.output_audio_transcript.done':
+      audioAssistantTranscript = data.transcript;
+      break;
     case 'response.done':
-      audioAssistantTranscript = data.response.output[0]?.content[0]?.transcript;
+      audioAssistantTranscript ||= getAssistantTranscript(data.response);
       if (!audioAssistantTranscript) return;
       const cachedInputAudioTokens = data.response.usage.input_token_details.cached_tokens_details.audio_tokens;
       const cachedInputTextTokens = data.response.usage.input_token_details.cached_tokens_details.text_tokens;
@@ -129,19 +133,28 @@ async function handleRealtimeSpeechEvent(data) {
       }
       if (data.response.status === 'failed') {
         removeTypingIndicator();
-        addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
-        audioAssistantTranscript = '';
+        showAssistantTranscript();
       }
       break;
     case 'output_audio_buffer.stopped':
       assistantHasResponded = true;
       removeTypingIndicator();
-      if (audioAssistantTranscript) {
-        addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
-        audioAssistantTranscript = '';
-      }
+      showAssistantTranscript();
       break;
   }
+}
+
+function showAssistantTranscript() {
+  if (!audioAssistantTranscript || assistantTranscriptDisplayed) return;
+  addMessageToUI({ role: 'assistant', text: audioAssistantTranscript });
+  assistantTranscriptDisplayed = true;
+}
+
+function getAssistantTranscript(response) {
+  return response?.output
+    ?.flatMap(output => output.content ?? [])
+    .map(content => content.transcript ?? content.audio?.transcript)
+    .find(Boolean);
 }
 
 speakBtn.addEventListener('click', async () => {

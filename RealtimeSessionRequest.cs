@@ -4,18 +4,46 @@ namespace OrgAI;
 
 public class RealtimeSessionRequest
 {
+  [JsonPropertyName("session")]
+  public RealtimeSession Session { get; set; } = new();
+}
+
+public class RealtimeSession
+{
+  [JsonPropertyName("type")]
+  public string Type { get; set; } = "realtime";
   [JsonPropertyName("model")]
   public string Model { get; set; }
   [JsonPropertyName("instructions")]
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string Instructions { get; set; }
-  [JsonPropertyName("voice")]
-  public string Voice { get; set; }
-  [JsonPropertyName("input_audio_noise_reduction")]
-  public RealtimeSessionInputAudioNoiseReduction InputAudioNoiseReduction { get; set; } = new();
-  [JsonPropertyName("input_audio_transcription")]
-  public RealtimeSessionInputAudioTranscription InputAudioTranscription { get; set; } = new();
+  [JsonPropertyName("audio")]
+  public RealtimeSessionAudio Audio { get; set; } = new();
+}
+
+public class RealtimeSessionAudio
+{
+  [JsonPropertyName("input")]
+  public RealtimeSessionInputAudio Input { get; set; } = new();
+  [JsonPropertyName("output")]
+  public RealtimeSessionOutputAudio Output { get; set; } = new();
+}
+
+public class RealtimeSessionInputAudio
+{
+  [JsonPropertyName("noise_reduction")]
+  public RealtimeSessionInputAudioNoiseReduction NoiseReduction { get; set; } = new();
+  [JsonPropertyName("transcription")]
+  public RealtimeSessionInputAudioTranscription Transcription { get; set; } = new();
   [JsonPropertyName("turn_detection")]
   public RealtimeSessionTurnDetection TurnDetection { get; set; } = new();
+}
+
+public class RealtimeSessionOutputAudio
+{
+  [JsonPropertyName("voice")]
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string Voice { get; set; }
 }
 
 public class RealtimeSessionInputAudioNoiseReduction
