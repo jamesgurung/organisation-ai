@@ -13,6 +13,8 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
 * A clean, professional chat interface
 * Access to the latest OpenAI language models
 * Customisable prompt presets for different teams
+* Web search
+* File search over vector stores
 * Understanding of uploaded images
 * Voice-to-voice conversations
 * Chat history
@@ -42,10 +44,14 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         "costPer1MCachedInputTokens": 0.14,
         "costPer1MAudioInputTokens": null,
         "costPer1MOutputTokens": 11.00,
-        "costPer1MAudioOutputTokens": null
+        "costPer1MAudioOutputTokens": null,
+        "costPer1KWebSearchCalls": null,
+        "costPer1KFileSearchCalls": null
       }
     ]
     ```
+
+    If a preset enables web search, the selected model must include `costPer1KWebSearchCalls`. If a preset enables file search by setting `vectorStore`, the selected model must include `costPer1KFileSearchCalls`.
 
 5. Within the `config` blob container, create a file `users.csv` with the following format:
 
@@ -70,14 +76,18 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "model": "gpt-5.1",
           "temperature": null,
           "reasoningEffort": "none",
-          "voice": null
+          "voice": null,
+          "webSearch": false,
+          "vectorStore": null
         }
       ],
       "reviewers": [ "reviewer@example.com" ],
       "showPresetDetails": true,
       "stopCommands": [
-        "token": "[offtopic]",
-        "message": "This is off-topic."
+        {
+          "token": "[offtopic]",
+          "message": "This is off-topic."
+        }
       ],
       "userMaxWeeklySpend": 2.00
     }
@@ -99,6 +109,8 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         * `temperature` (optional) - the temperature to use, where supported by the model
         * `reasoningEffort` (optional) - the reasoning effort to use, where supported by the model
         * `voice` (optional) - when set, this enables speech-to-speech mode using the specified voice
+        * `webSearch` (optional) - when `true`, enables Responses API web search
+        * `vectorStore` (optional) - when set to an existing vector store ID such as `vs_abc123`, enables Responses API file search over that vector store; the vector store must already exist and file ingestion must be completed
     * `reviewers` - an array of users to give reviewer access, which allows them to retrospectively review all AI conversations in this group
     * `showPresetDetails` - whether to show the preset details, such as the system instructions and model name, to the user
     * `stopCommands` - specific strings that, if received from the language model, will stop the conversation and display a customised message; this needs to be used in conjunction with the model `instructions` above, and can be useful for safety purposes

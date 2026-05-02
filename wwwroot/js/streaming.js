@@ -45,10 +45,10 @@ function processChunk(chunk) {
     case '[web_search_completed]':
     case '[file_search_completed]':
     case '[reasoning_completed]':
-      const completedText = chunk === '[web_search_completed]' ? 'Searched the web.' : chunk === '[file_search_in_progress]' ? 'Searched documents.' : 'Finished thinking.';
+      const completedText = chunk === '[web_search_completed]' ? 'Searched the web.' : chunk === '[file_search_completed]' ? 'Searched documents.' : 'Finished thinking.';
       searchStatusElement.innerHTML = `<div class="search-completed"><span class="material-symbols-rounded">check_circle</span> ${completedText}</div>`;
       textContainer = null;
-      break;``
+      break;
     case '[spend_limit_reached]':
       spendLimitReached = true;
       break;

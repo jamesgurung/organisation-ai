@@ -56,4 +56,8 @@ public class Preset
   public string ReasoningEffort { get; set; }
   [JsonPropertyName("voice"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string Voice { get; set; }
+  [JsonPropertyName("webSearch"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+  public bool WebSearch { get; set; }
+  [JsonPropertyName("vectorStore"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string VectorStore { get; set; }
 }

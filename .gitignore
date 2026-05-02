@@ -7,3 +7,4 @@ Properties/PublishProfiles/
 Properties/ServiceDependencies/
 appsettings.json
 *.user
+*.lscache

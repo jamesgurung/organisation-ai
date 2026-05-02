@@ -88,6 +88,14 @@ public static class Api
       {
         return Results.BadRequest("Model not supported.");
       }
+      if (conversation.Preset.WebSearch && model.CostPer1KWebSearchCalls is null)
+      {
+        return Results.BadRequest("Web search cost is not configured for this model.");
+      }
+      if (!string.IsNullOrWhiteSpace(conversation.Preset.VectorStore) && model.CostPer1KFileSearchCalls is null)
+      {
+        return Results.BadRequest("File search cost is not configured for this model.");
+      }
       var userTurn = new ConversationTurn
       {
         Role = "user",
@@ -128,6 +136,14 @@ public static class Api
         StoredOutputEnabled = false,
         StreamingEnabled = true
       };
+      if (conversation.Preset.WebSearch)
+      {
+        chatOptions.Tools.Add(ResponseTool.CreateWebSearchTool());
+      }
+      if (!string.IsNullOrWhiteSpace(conversation.Preset.VectorStore))
+      {
+        chatOptions.Tools.Add(ResponseTool.CreateFileSearchTool(vectorStoreIds: [conversation.Preset.VectorStore]));
+      }
 
       var responseItems = conversation.AsResponseItems();
       foreach (var responseItem in responseItems)
@@ -184,10 +200,10 @@ public static class Api
               await StreamText(":::[web_search_completed]:::");
               break;
             case StreamingResponseCompletedUpdate completion:
-              await FinishStreamAsync(completion.Response.GetOutputText(), completion.Response.Usage);
+              await FinishStreamAsync(completion.Response);
               break;
             case StreamingResponseIncompleteUpdate filtered:
-              await FinishStreamAsync(FlagToken, filtered.Response.Usage);
+              await FinishStreamAsync(filtered.Response, FlagToken);
               break;
             default:
               break;
@@ -202,10 +218,16 @@ public static class Api
           await outputStream.FlushAsync(ct);
         }
 
-        async Task FinishStreamAsync(string text, ResponseTokenUsage usage)
+        async Task FinishStreamAsync(ResponseResult response, string textOverride = null)
         {
+          var sourcesMarkdown = textOverride is null ? GetSourcesMarkdown(response) : string.Empty;
+          var text = textOverride ?? response.GetOutputText() + sourcesMarkdown;
+          if (!string.IsNullOrEmpty(sourcesMarkdown))
+          {
+            await StreamText(sourcesMarkdown);
+          }
           conversation.Turns.Add(new() { Role = "assistant", Text = text });
-          var cost = CalculateCost(model, usage);
+          var cost = CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response));
           if (isFirstTurn)
           {
             string title;
@@ -449,14 +471,58 @@ public static class Api
     };
   }
 
-  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage)
+  private static string GetSourcesMarkdown(ResponseResult response)
+  {
+    var messageAnnotations = response.OutputItems
+      .OfType<MessageResponseItem>()
+      .SelectMany(message => message.Content ?? [])
+      .SelectMany(content => content.OutputTextAnnotations ?? [])
+      .ToList();
+
+    var uriCitations = messageAnnotations
+      .OfType<UriCitationMessageAnnotation>()
+      .GroupBy(citation => citation.Uri)
+      .Select(group => group.First())
+      .ToList();
+
+    if (uriCitations.Count == 0) return string.Empty;
+
+    var sources = new StringBuilder();
+    sources.AppendLine();
+    sources.AppendLine();
+    sources.AppendLine("### Sources");
+    foreach (var citation in uriCitations)
+    {
+      var title = string.IsNullOrWhiteSpace(citation.Title) ? citation.Uri.ToString() : citation.Title;
+      sources.Append("* [");
+      sources.Append(title);
+      sources.Append("](");
+      sources.Append(citation.Uri);
+      sources.AppendLine(")");
+    }
+    return sources.ToString();
+  }
+
+  private static int CountWebSearchCalls(ResponseResult response)
+  {
+    return response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
+  }
+
+  private static int CountFileSearchCalls(ResponseResult response)
+  {
+    return response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
+  }
+
+  private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int webSearchCallCount = 0, int fileSearchCallCount = 0)
   {
 #if DEBUG
     return 0;
 #else
     return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * model.CostPer1MCachedInputTokens / 1_000_000m) +
-           (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m);
+           (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
+           (webSearchCallCount * (model.CostPer1KWebSearchCalls ?? 0) / 1_000m) +
+           (fileSearchCallCount * (model.CostPer1KFileSearchCalls ?? 0) / 1_000m);
 #endif
   }
 
