@@ -47,7 +47,10 @@ function applyPreset(preset, isReviewing) {
     tempDisplay.textContent = currentPreset.temperature?.toFixed(1) ?? '';
     const reasoning = currentPreset.reasoningEffort && currentPreset.reasoningEffort !== 'none' && currentPreset.reasoningEffort !== 'minimal';
     settingItemReasoning.style.display = reasoning ? 'flex' : 'none';
-    reasoningDisplay.textContent = !reasoning || currentPreset.reasoningEffort == 'low' ? '' : currentPreset.reasoningEffort;
+    settingItemReasoning.title = reasoning ? `Reasoning model (${currentPreset.reasoningEffort} thinking)` : 'Reasoning model';
+    settingItemWebSearch.style.display = currentPreset.webSearch ? 'flex' : 'none';
+    settingItemDocumentSearch.style.display = currentPreset.vectorStore ? 'flex' : 'none';
+    settingItemImageGeneration.style.display = currentPreset.imageModel ? 'flex' : 'none';
     instructionsDiv = instructionsPopup.querySelector('div');
     instructionsDiv.textContent = currentPreset.instructions;
     instructionsDiv.scrollTop = 0;

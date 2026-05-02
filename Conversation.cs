@@ -33,7 +33,21 @@ public class Conversation
           items.Add(ResponseItem.CreateUserMessageItem(parts));
           break;
         case "assistant":
-          items.Add(ResponseItem.CreateAssistantMessageItem(turn.Text));
+          if ((turn.Images?.Count ?? 0) == 0)
+          {
+            items.Add(ResponseItem.CreateAssistantMessageItem(turn.Text));
+            break;
+          }
+          var assistantParts = new List<ResponseContentPart>(turn.Images.Count + 1)
+          {
+            ResponseContentPart.CreateOutputTextPart(turn.Text, [])
+          };
+          foreach (var image in turn.Images)
+          {
+            var uri = new Uri($"data:{image.Type};base64,{image.Content}");
+            assistantParts.Add(ResponseContentPart.CreateInputImagePart(uri));
+          }
+          items.Add(ResponseItem.CreateAssistantMessageItem(assistantParts));
           break;
         default:
           throw new InvalidOperationException($"Unknown role: {turn.Role}.");

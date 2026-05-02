@@ -15,6 +15,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
 * Customisable prompt presets for different teams
 * Web search
 * File search over vector stores
+* Image generation
 * Understanding of uploaded images
 * Voice-to-voice conversations
 * Chat history
@@ -42,6 +43,9 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         "name": "gpt-5.1",
         "costPer1MInputTokens": 1.38,
         "costPer1MCachedInputTokens": 0.14,
+        "costPer1MImageInputTokens": null,
+        "costPer1MImageCachedInputTokens": null,
+        "costPer1MImageOutputTokens": null,
         "costPer1MAudioInputTokens": null,
         "costPer1MOutputTokens": 11.00,
         "costPer1MAudioOutputTokens": null,
@@ -74,6 +78,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "introduction": null,
           "instructions": "You are a helpful AI assistant.",
           "model": "gpt-5.1",
+          "imageModel": null,
           "temperature": null,
           "reasoningEffort": "none",
           "voice": null,
@@ -106,6 +111,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         * `introduction` - the message to display when this preset is selected, in Markdown format (note that this is not sent to the language model)
         * `instructions` - the system instructions to send to the language model along with the user's message
         * `model` - the OpenAI model to use for this preset, as configured below
+        * `imageModel` (optional) - when set to a GPT Image model such as `gpt-image-2`, enables Responses API image generation for this preset
         * `temperature` (optional) - the temperature to use, where supported by the model
         * `reasoningEffort` (optional) - the reasoning effort to use, where supported by the model
         * `voice` (optional) - when set, this enables speech-to-speech mode using the specified voice

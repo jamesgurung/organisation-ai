@@ -403,6 +403,7 @@ button {
 
 .assistant-message {
   align-self: flex-start;
+  width: 100%;
 }
 
 .assistant-message.error {
@@ -897,6 +898,25 @@ message a:visited {
 .message-image {
   max-height: 100px;
   object-fit: cover;
+}
+
+.assistant-message .message-files {
+  flex-direction: column;
+  width: 100%;
+}
+
+.assistant-message .message-file,
+.assistant-message .message-file a {
+  align-items: stretch;
+  display: block;
+  width: 100%;
+}
+
+.assistant-message .message-image {
+  display: block;
+  max-height: none;
+  object-fit: contain;
+  width: 100%;
 }
 
 .message-files {

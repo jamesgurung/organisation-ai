@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OpenAI;
+using OpenAI.Images;
 using OpenAI.Responses;
 using System.ClientModel;
 using System.Globalization;
@@ -14,6 +15,7 @@ public static class Api
 {
   public const string FlagToken = "[FLAG]";
   public const string FlagIcon = "\uD83D\uDEA9";
+  private const string GenerateImageToolName = "generate_image";
 
   private static OpenAIClient _aiClient;
 
@@ -96,6 +98,11 @@ public static class Api
       {
         return Results.BadRequest("File search cost is not configured for this model.");
       }
+      var imageModel = string.IsNullOrWhiteSpace(conversation.Preset.ImageModel) ? null : OpenAIConfig.Instance.Models.GetValueOrDefault(conversation.Preset.ImageModel);
+      if (!string.IsNullOrWhiteSpace(conversation.Preset.ImageModel) && imageModel is null)
+      {
+        return Results.BadRequest("Image model not supported.");
+      }
       var userTurn = new ConversationTurn
       {
         Role = "user",
@@ -143,6 +150,26 @@ public static class Api
       if (!string.IsNullOrWhiteSpace(conversation.Preset.VectorStore))
       {
         chatOptions.Tools.Add(ResponseTool.CreateFileSearchTool(vectorStoreIds: [conversation.Preset.VectorStore]));
+      }
+      if (!string.IsNullOrWhiteSpace(conversation.Preset.ImageModel))
+      {
+        chatOptions.Tools.Add(ResponseTool.CreateFunctionTool(
+          GenerateImageToolName,
+          BinaryData.FromString("""
+            {
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "A detailed prompt describing the image to generate."
+                }
+              },
+              "required": ["prompt"],
+              "additionalProperties": false
+            }
+            """),
+          true,
+          $"Generate an image using {conversation.Preset.ImageModel}."));
       }
 
       var responseItems = conversation.AsResponseItems();
@@ -199,12 +226,15 @@ public static class Api
             case StreamingResponseWebSearchCallCompletedUpdate:
               await StreamText(":::[web_search_completed]:::");
               break;
+            case StreamingResponseFailedUpdate failed:
+              await StreamText($":::[error={failed.Response.Error?.Message ?? "The response failed."}]:::");
+              break;
             case StreamingResponseCompletedUpdate completion:
               await FinishStreamAsync(completion.Response);
-              break;
+              return;
             case StreamingResponseIncompleteUpdate filtered:
               await FinishStreamAsync(filtered.Response, FlagToken);
-              break;
+              return;
             default:
               break;
           }
@@ -220,14 +250,35 @@ public static class Api
 
         async Task FinishStreamAsync(ResponseResult response, string textOverride = null)
         {
+          var manualImageCost = 0m;
           var sourcesMarkdown = textOverride is null ? GetSourcesMarkdown(response) : string.Empty;
           var text = textOverride ?? response.GetOutputText() + sourcesMarkdown;
+          var images = textOverride is null ? GetGeneratedImages(response) : [];
+          if (textOverride is null && imageModel is not null)
+          {
+            foreach (var imagePrompt in GetImageGenerationPrompts(response))
+            {
+              await StreamText(":::[image_generation_in_progress]:::");
+              var generatedImage = await GenerateImageAsync(conversation.Preset.ImageModel, imagePrompt, id, ct);
+              await StreamText(":::[image_generation_completed]:::");
+              images.Add(generatedImage.Image);
+              manualImageCost += generatedImage.Cost;
+            }
+          }
           if (!string.IsNullOrEmpty(sourcesMarkdown))
           {
             await StreamText(sourcesMarkdown);
           }
-          conversation.Turns.Add(new() { Role = "assistant", Text = text });
-          var cost = CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response));
+          foreach (var image in images)
+          {
+            await StreamText($":::[image={image.Type};{image.Content}]:::");
+          }
+          conversation.Turns.Add(new() { Role = "assistant", Text = text, Images = images.Count > 0 ? images : null });
+          var cost = manualImageCost + (manualImageCost > 0
+            ? CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response))
+            : images.Count > 0
+              ? CalculateImageCost(imageModel, response.Usage, (userTurn.Images?.Count ?? 0) > 0)
+              : CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response)));
           if (isFirstTurn)
           {
             string title;
@@ -513,6 +564,58 @@ public static class Api
     return response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
   }
 
+  private static List<ConversationTurnImage> GetGeneratedImages(ResponseResult response)
+  {
+    return response.OutputItems
+      .OfType<ImageGenerationCallResponseItem>()
+      .Where(item => item.ImageResultBytes is not null)
+      .Select(item => new ConversationTurnImage
+      {
+        Type = "image/png",
+        Content = Convert.ToBase64String(item.ImageResultBytes.ToArray())
+      })
+      .ToList();
+  }
+
+  private static IEnumerable<string> GetImageGenerationPrompts(ResponseResult response)
+  {
+    return response.OutputItems
+      .OfType<FunctionCallResponseItem>()
+      .Where(item => item.FunctionName == GenerateImageToolName)
+      .Select(item =>
+      {
+        using var document = JsonDocument.Parse(item.FunctionArguments);
+        return document.RootElement.TryGetProperty("prompt", out var prompt) ? prompt.GetString() : null;
+      })
+      .Where(prompt => !string.IsNullOrWhiteSpace(prompt));
+  }
+
+  private static async Task<GeneratedConversationImage> GenerateImageAsync(string model, string prompt, string endUserId, CancellationToken ct)
+  {
+    var imageResponse = await _aiClient.GetImageClient(model).GenerateImageAsync(prompt, new() { EndUserId = endUserId, Quality = GeneratedImageQuality.LowQuality }, ct);
+    var image = imageResponse.Value;
+    return new(new ConversationTurnImage { Type = "image/png", Content = Convert.ToBase64String(image.ImageBytes.ToArray()) },
+      CalculateImageCost(OpenAIConfig.Instance.Models[model], GetGeneratedImageUsage(imageResponse.GetRawResponse().Content)));
+  }
+
+  private static GeneratedImageUsage GetGeneratedImageUsage(BinaryData content)
+  {
+    using var document = JsonDocument.Parse(content.ToMemory());
+    var usage = document.RootElement.GetProperty("usage");
+    var inputDetails = usage.GetProperty("input_tokens_details");
+
+    return new()
+    {
+      InputTokenDetails = new()
+      {
+        ImageTokenCount = inputDetails.GetProperty("image_tokens").GetInt32(),
+        TextTokenCount = inputDetails.GetProperty("text_tokens").GetInt32()
+      },
+      OutputTokenCount = usage.GetProperty("output_tokens").GetInt32(),
+      TotalTokenCount = usage.GetProperty("total_tokens").GetInt32()
+    };
+  }
+
   private static decimal CalculateCost(OpenAIModelConfig model, ResponseTokenUsage usage, int webSearchCallCount = 0, int fileSearchCallCount = 0)
   {
 #if DEBUG
@@ -523,6 +626,43 @@ public static class Api
            (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
            (webSearchCallCount * (model.CostPer1KWebSearchCalls ?? 0) / 1_000m) +
            (fileSearchCallCount * (model.CostPer1KFileSearchCalls ?? 0) / 1_000m);
+#endif
+  }
+
+  private static decimal CalculateImageCost(OpenAIModelConfig model, ResponseTokenUsage usage, bool hasInputImage)
+  {
+#if DEBUG
+    return 0;
+#else
+    var inputCost = hasInputImage ? model.CostPer1MImageInputTokens ?? model.CostPer1MInputTokens : model.CostPer1MInputTokens;
+    var cachedInputCost = hasInputImage ? model.CostPer1MImageCachedInputTokens ?? model.CostPer1MCachedInputTokens : model.CostPer1MCachedInputTokens;
+    var outputCost = model.CostPer1MImageOutputTokens ?? model.CostPer1MOutputTokens;
+    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * inputCost / 1_000_000m) +
+           (usage.InputTokenDetails.CachedTokenCount * cachedInputCost / 1_000_000m) +
+           (usage.OutputTokenCount * outputCost / 1_000_000m);
+#endif
+  }
+
+  private static decimal CalculateImageCost(OpenAIModelConfig model, ImageTokenUsage usage)
+  {
+#if DEBUG
+    return 0;
+#else
+    return (usage.InputTokenDetails.TextTokenCount * model.CostPer1MInputTokens / 1_000_000m) +
+           (usage.InputTokenDetails.ImageTokenCount * (model.CostPer1MImageInputTokens ?? model.CostPer1MInputTokens) / 1_000_000m) +
+           (usage.OutputTokenDetails.TextTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
+           (usage.OutputTokenDetails.ImageTokenCount * (model.CostPer1MImageOutputTokens ?? model.CostPer1MOutputTokens) / 1_000_000m);
+#endif
+  }
+
+  private static decimal CalculateImageCost(OpenAIModelConfig model, GeneratedImageUsage usage)
+  {
+#if DEBUG
+    return 0;
+#else
+    return (usage.InputTokenDetails.TextTokenCount * model.CostPer1MInputTokens / 1_000_000m) +
+           (usage.InputTokenDetails.ImageTokenCount * (model.CostPer1MImageInputTokens ?? model.CostPer1MInputTokens) / 1_000_000m) +
+           (usage.OutputTokenCount * (model.CostPer1MImageOutputTokens ?? model.CostPer1MOutputTokens) / 1_000_000m);
 #endif
   }
 
@@ -538,6 +678,21 @@ public static class Api
            (entry.CachedInputTextTokens * model.CostPer1MCachedInputTokens / 1_000_000m) +
            (entry.CachedInputAudioTokens * model.CostPer1MCachedInputTokens / 1_000_000m);
 #endif
+  }
+
+  private record GeneratedConversationImage(ConversationTurnImage Image, decimal Cost);
+
+  private class GeneratedImageUsage
+  {
+    public GeneratedImageInputTokenDetails InputTokenDetails { get; set; }
+    public int OutputTokenCount { get; set; }
+    public int TotalTokenCount { get; set; }
+  }
+
+  private class GeneratedImageInputTokenDetails
+  {
+    public int ImageTokenCount { get; set; }
+    public int TextTokenCount { get; set; }
   }
 }
 

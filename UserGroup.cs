@@ -50,6 +50,8 @@ public class Preset
   public string Instructions { get; set; }
   [JsonPropertyName("model"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string Model { get; set; }
+  [JsonPropertyName("imageModel"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string ImageModel { get; set; }
   [JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public decimal? Temperature { get; set; }
   [JsonPropertyName("reasoningEffort"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
