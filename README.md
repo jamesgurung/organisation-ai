@@ -40,17 +40,17 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     ```json
     [
       {
-        "name": "gpt-5.1",
-        "costPer1MInputTokens": 1.38,
-        "costPer1MCachedInputTokens": 0.14,
+        "name": "gpt-5.6-sol",
+        "costPer1MInputTokens": 5.00,
+        "costPer1MCachedInputTokens": 0.50,
         "costPer1MImageInputTokens": null,
         "costPer1MImageCachedInputTokens": null,
         "costPer1MImageOutputTokens": null,
         "costPer1MAudioInputTokens": null,
-        "costPer1MOutputTokens": 11.00,
+        "costPer1MOutputTokens": 30.00,
         "costPer1MAudioOutputTokens": null,
-        "costPer1KWebSearchCalls": null,
-        "costPer1KFileSearchCalls": null
+        "costPer1KWebSearchCalls": 10.00,
+        "costPer1KFileSearchCalls": 2.50
       }
     ]
     ```
@@ -77,7 +77,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "category": null,
           "introduction": null,
           "instructions": "You are a helpful AI assistant.",
-          "model": "gpt-5.1",
+          "model": "gpt-5.6-sol",
           "imageModel": null,
           "temperature": null,
           "reasoningEffort": "none",
@@ -154,7 +154,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     * `Azure__TenantId` - your Azure tenant ID
     * `OpenAI__AIFoundryApiKey` - the API key for your Azure AI Foundry project
     * `OpenAI__AIFoundryEndpoint` - the endpoint URL for your Azure AI Foundry deployment, e.g. `https://<project>.cognitiveservices.azure.com/`
-    * `OpenAI__TitleSummarisationModel` - the deployment which will be used to summarise titles, e.g. `gpt-5-mini`
+    * `OpenAI__TitleSummarisationModel` - the deployment which will be used to summarise titles, e.g. `gpt-5.6-luna`
     * `Organisation__AppWebsite` - the host name where this app will be hosted, e.g. `example.com`
     * `Organisation__Name` - the name of your organisation
     * `Organisation__SyncApiKey` - a secret key to be used when updating the `users.csv` file with an automated script (optional)

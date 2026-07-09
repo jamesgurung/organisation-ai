@@ -81,7 +81,7 @@ public static class Api
 
         conversation = new Conversation { Preset = preset };
         id = Guid.NewGuid().ToString();
-        summaryTask = SummariseAsync(preset.Title, prompt, id);
+        summaryTask = SummariseAsync(string.IsNullOrEmpty(preset.Introduction) ? null : preset.Title, prompt, id);
       }
       else
       {
@@ -101,7 +101,8 @@ public static class Api
       }
       if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
       {
-        return Results.BadRequest("Model not supported.");
+        model = OpenAIConfig.Instance.Models.Values.First();
+        conversation.Preset.Model = model.Name;
       }
       if (conversation.Preset.WebSearch && model.CostPer1KWebSearchCalls is null)
       {
@@ -266,7 +267,7 @@ public static class Api
         {
           var manualImageCost = 0m;
           var sourcesMarkdown = textOverride is null ? GetSourcesMarkdown(response) : string.Empty;
-          var text = textOverride ?? response.GetOutputText() + sourcesMarkdown;
+          var text = textOverride ?? (response.GetOutputText() + sourcesMarkdown);
           var images = textOverride is null ? GetGeneratedImages(response) : [];
           if (textOverride is null && imageModel is not null)
           {
@@ -493,7 +494,8 @@ public static class Api
         conversation = await BlobService.GetConversationAsync(id);
         if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
         {
-          return Results.BadRequest("Model not supported.");
+          model = OpenAIConfig.Instance.Models.Values.First();
+          conversation.Preset.Model = model.Name;
         }
         cost = CalculateSpeechCost(model, entry);
         var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
@@ -543,7 +545,7 @@ public static class Api
         Try to capture the full context of the query, not just the task category.
         Only respond with the plaintext title (3 words or less) and nothing else (no introduction or conclusion).
         """,
-      ReasoningOptions = new() { ReasoningEffortLevel = "minimal" },
+      ReasoningOptions = new() { ReasoningEffortLevel = "none" },
       StoredOutputEnabled = false
     };
     var summaryPrompt = string.IsNullOrEmpty(presetTitle) ? prompt : $"{presetTitle}: {prompt}";
