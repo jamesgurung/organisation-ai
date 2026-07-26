@@ -2,10 +2,21 @@
 let currentResponseElement = null;
 let searchStatusElement = null;
 let textContainer = null;
+const inProgressStatuses = {
+  '[web_search_in_progress]': { text: 'Searching the web...', icon: 'search' },
+  '[file_search_in_progress]': { text: 'Searching documents...', icon: 'search' },
+  '[reasoning_in_progress]': { text: 'Thinking...', icon: 'neurology' },
+  '[image_generation_in_progress]': { text: 'Generating image (this may take several minutes)...', icon: 'image' }
+};
+const completedStatusText = {
+  '[web_search_completed]': 'Searched the web.',
+  '[file_search_completed]': 'Searched documents.',
+  '[reasoning_completed]': 'Finished thinking.',
+  '[image_generation_completed]': 'Generated image.'
+};
 
-async function streamResponse(resp) {
-
-  const reader = resp.body.getReader();
+async function streamResponse(response) {
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
@@ -37,7 +48,6 @@ async function streamResponse(resp) {
 }
 
 function processChunk(chunk) {
-
   if (chunk.length === 0) return;
 
   if (!currentResponseElement) {
@@ -48,72 +58,59 @@ function processChunk(chunk) {
     textContainer = null;
   }
 
-  switch (chunk) {
-    case '[web_search_in_progress]':
-    case '[file_search_in_progress]':
-    case '[reasoning_in_progress]':
-    case '[image_generation_in_progress]':
-      const inProgressText = chunk === '[web_search_in_progress]' ? 'Searching the web...' :
-        chunk === '[file_search_in_progress]' ? 'Searching documents...' :
-          chunk === '[image_generation_in_progress]' ? 'Generating image (this may take several minutes)...' : 'Thinking...';
-      searchStatusElement = document.createElement('div');
-      searchStatusElement.className = 'search-container';
-      currentResponseElement.appendChild(searchStatusElement);
-      searchStatusElement.innerHTML = '<div class="search-in-progress"><span class="material-symbols-rounded">' +
-        `${chunk === '[reasoning_in_progress]' ? 'neurology' : chunk === '[image_generation_in_progress]' ? 'image' : 'search'}</span> ${inProgressText}</div>`;
-      break;
-    case '[web_search_completed]':
-    case '[file_search_completed]':
-    case '[reasoning_completed]':
-    case '[image_generation_completed]':
-      const completedText = chunk === '[web_search_completed]' ? 'Searched the web.' :
-        chunk === '[file_search_completed]' ? 'Searched documents.' :
-          chunk === '[image_generation_completed]' ? 'Generated image.' : 'Finished thinking.';
-      if (searchStatusElement) searchStatusElement.innerHTML = `<div class="search-completed"><span class="material-symbols-rounded">check_circle</span> ${completedText}</div>`;
-      textContainer = null;
-      break;
-    case '[spend_limit_reached]':
-      spendLimitReached = true;
-      break;
-    case '[flagged]':
-      showStopMessage(currentResponseElement, stopCommands.find(o => o.token === '[FLAG]'));
-      break;
-    case '[heartbeat]':
-      break;
-    default:
-      if (chunk.startsWith('[conversation=')) {
-        currentChatId = chunk.substring(14, 50);
-        const conversationEntity = { id: currentChatId, title: chunk.substring(51, chunk.length - 1) };
-        history.unshift(conversationEntity);
-        const historyItem = createHistoryItem(conversationEntity);
-        historyContainer.insertBefore(historyItem, historyContainer.firstChild);
+  const inProgressStatus = inProgressStatuses[chunk];
+  const completedText = completedStatusText[chunk];
+  if (inProgressStatus) {
+    searchStatusElement = document.createElement('div');
+    searchStatusElement.className = 'search-container';
+    searchStatusElement.innerHTML = `<div class="search-in-progress"><span class="material-symbols-rounded">${inProgressStatus.icon}</span> ${inProgressStatus.text}</div>`;
+    currentResponseElement.appendChild(searchStatusElement);
+  } else if (completedText) {
+    if (searchStatusElement)
+      searchStatusElement.innerHTML = `<div class="search-completed"><span class="material-symbols-rounded">check_circle</span> ${completedText}</div>`;
+    textContainer = null;
+  } else {
+    switch (chunk) {
+      case '[spend_limit_reached]':
+        spendLimitReached = true;
         break;
-      }
-      if (chunk.startsWith('[image=')) {
-        const separatorIndex = chunk.indexOf(';');
-        appendImageToCurrentResponse(chunk.substring(7, separatorIndex), chunk.substring(separatorIndex + 1, chunk.length - 1));
+      case '[flagged]':
+        showStopMessage(currentResponseElement, stopCommands.find(o => o.token === '[FLAG]'));
         break;
-      }
-      if (chunk.startsWith('[error=')) {
-        currentResponseElement.classList.add('error');
-        currentResponseElement.textContent = chunk.substring(7, chunk.length - 1) || 'Something went wrong. Please try again later.';
+      case '[heartbeat]':
         break;
-      }
+      default:
+        if (chunk.startsWith('[conversation=')) {
+          currentChatId = chunk.substring(14, 50);
+          const conversationEntity = { id: currentChatId, title: chunk.substring(51, chunk.length - 1) };
+          history.unshift(conversationEntity);
+          const historyItem = createHistoryItem(conversationEntity);
+          historyContainer.insertBefore(historyItem, historyContainer.firstChild);
+          break;
+        }
+        if (chunk.startsWith('[image=')) {
+          const separatorIndex = chunk.indexOf(';');
+          appendImageToCurrentResponse(chunk.substring(7, separatorIndex), chunk.substring(separatorIndex + 1, chunk.length - 1));
+          break;
+        }
+        if (chunk.startsWith('[error=')) {
+          currentResponseElement.classList.add('error');
+          currentResponseElement.textContent = chunk.substring(7, chunk.length - 1) || 'Something went wrong. Please try again later.';
+          break;
+        }
 
-      if (!textContainer) {
-        textContainer = document.createElement('div');
-        currentResponseElement.appendChild(textContainer);
-        currentResponseText = '';
-      }
-      currentResponseText += chunk;
+        if (!textContainer) {
+          textContainer = document.createElement('div');
+          currentResponseElement.appendChild(textContainer);
+          currentResponseText = '';
+        }
+        currentResponseText += chunk;
 
-      const stopCommand = stopCommands.find(({ token }) => currentResponseText.includes(token));
-      if (stopCommand) {
-        showStopMessage(currentResponseElement, stopCommand);
-      } else {
-        textContainer.innerHTML = markdownToHtml(currentResponseText);
-      }
-      break;
+        const stopCommand = stopCommands.find(({ token }) => currentResponseText.includes(token));
+        if (stopCommand) showStopMessage(currentResponseElement, stopCommand);
+        else textContainer.innerHTML = markdownToHtml(currentResponseText);
+        break;
+    }
   }
 
   scrollChatContainer();
@@ -127,19 +124,5 @@ function appendImageToCurrentResponse(type, content) {
     currentResponseElement.appendChild(filesContainer);
   }
 
-  const fileElement = document.createElement('div');
-  fileElement.className = 'message-file';
-
-  const img = document.createElement('img');
-  img.src = `data:${type};base64,${content}`;
-  img.className = 'message-image';
-  img.alt = 'Image';
-
-  const downloadLink = document.createElement('a');
-  downloadLink.href = img.src;
-  downloadLink.download = `image.${type.split('/')[1]}`;
-  downloadLink.appendChild(img);
-
-  fileElement.appendChild(downloadLink);
-  filesContainer.appendChild(fileElement);
+  filesContainer.appendChild(createImageFileElement(type, content));
 }

@@ -47,6 +47,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         "costPer1MImageCachedInputTokens": null,
         "costPer1MImageOutputTokens": null,
         "costPer1MAudioInputTokens": null,
+        "costPer1MAudioCachedInputTokens": null,
         "costPer1MOutputTokens": 30.00,
         "costPer1MAudioOutputTokens": null,
         "costPer1KWebSearchCalls": 10.00,

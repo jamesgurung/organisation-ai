@@ -17,8 +17,17 @@ public class RealtimeSession
   [JsonPropertyName("instructions")]
   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string Instructions { get; set; }
+  [JsonPropertyName("reasoning")]
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public RealtimeSessionReasoning Reasoning { get; set; }
   [JsonPropertyName("audio")]
   public RealtimeSessionAudio Audio { get; set; } = new();
+}
+
+public class RealtimeSessionReasoning
+{
+  [JsonPropertyName("effort")]
+  public string Effort { get; set; }
 }
 
 public class RealtimeSessionAudio
@@ -57,7 +66,7 @@ public class RealtimeSessionInputAudioTranscription
   [JsonPropertyName("language")]
   public string Language { get; set; } = "en";
   [JsonPropertyName("model")]
-  public string Model { get; set; } = "gpt-4o-mini-transcribe";
+  public string Model { get; set; } = OpenAIConfig.TranscriptionModelName;
 }
 
 public class RealtimeSessionTurnDetection
@@ -84,6 +93,12 @@ public class RealtimeConversationEntry
   public int OutputAudioTokens { get; set; }
   [JsonPropertyName("outputTextTokens")]
   public int OutputTextTokens { get; set; }
+  [JsonPropertyName("transcriptionInputAudioTokens")]
+  public int TranscriptionInputAudioTokens { get; set; }
+  [JsonPropertyName("transcriptionInputTextTokens")]
+  public int TranscriptionInputTextTokens { get; set; }
+  [JsonPropertyName("transcriptionOutputTokens")]
+  public int TranscriptionOutputTokens { get; set; }
   [JsonPropertyName("userTranscript")]
   public string UserTranscript { get; set; }
   [JsonPropertyName("assistantTranscript")]

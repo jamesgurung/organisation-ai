@@ -10,6 +10,8 @@ namespace OrgAI;
 
 public static class AuthConfig
 {
+  private static readonly string[] _authenticationSchemes = ["Microsoft"];
+
   public static void ConfigureAuth(this WebApplicationBuilder builder)
   {
     ArgumentNullException.ThrowIfNull(builder);
@@ -37,13 +39,10 @@ public static class AuthConfig
           {
             var issued = context.Properties.IssuedUtc;
             if (issued.HasValue && issued.Value > DateTimeOffset.UtcNow.AddDays(-1))
-            {
               return;
-            }
+
             if (UserExists(context.Principal.Identity.Name))
-            {
               context.ShouldRenew = true;
-            }
             else
             {
               context.RejectPrincipal();
@@ -87,24 +86,19 @@ public static class AuthConfig
     builder.Services.AddAuthorizationBuilder().SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
   }
 
-  private static bool UserExists(string email)
-  {
-    return !string.IsNullOrWhiteSpace(email) && UserGroup.GroupNameByUserEmail.ContainsKey(email);
-  }
-
-  private static readonly string[] authenticationSchemes = ["Microsoft"];
+  private static bool UserExists(string email) => !string.IsNullOrWhiteSpace(email) && UserGroup.GroupNameByUserEmail.ContainsKey(email);
 
   public static void MapAuthPaths(this WebApplication app)
   {
     app.MapGet("/auth/login/challenge", [AllowAnonymous] ([FromQuery] string path) =>
     {
       var authProperties = new AuthenticationProperties { RedirectUri = path is null ? "/" : WebUtility.UrlDecode(path), AllowRefresh = true, IsPersistent = true };
-      return Results.Challenge(authProperties, authenticationSchemes);
+      return Results.Challenge(authProperties, _authenticationSchemes);
     });
 
-    app.MapGet("/auth/logout", (HttpContext context) =>
+    app.MapGet("/auth/logout", async (HttpContext context) =>
     {
-      context.SignOutAsync();
+      await context.SignOutAsync();
       return Results.Redirect("/auth/login");
     });
   }

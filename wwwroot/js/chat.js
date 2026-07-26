@@ -1,5 +1,8 @@
 let currentChatId = null;
 let selectedFiles = [];
+const allowedFileTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+const maxShortImageSide = 768;
+const maxLongImageSide = 2000;
 
 async function handleSubmit(e) {
   e.preventDefault();
@@ -10,13 +13,12 @@ async function handleSubmit(e) {
 
   const userTurn = { role: 'user', text: message, timestamp: new Date().toISOString() };
 
-  if (selectedFiles.length > 0) {
-    const processFilesByType = (fileArray, isImage) => {
-      return Promise.all(fileArray.map(async file => {
+  if (files.length > 0) {
+    const processFilesByType = (fileArray, isImage) =>
+      Promise.all(fileArray.map(async file => {
         const content = await readFileAsBase64(file);
         return isImage ? { content, type: file.type } : { content, filename: file.name };
       }));
-    };
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
     const otherFiles = files.filter(file => !file.type.startsWith('image/'));
     if (imageFiles.length > 0) userTurn.images = await processFilesByType(imageFiles, true);
@@ -37,7 +39,7 @@ async function handleSubmit(e) {
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => { resolve(reader.result.split(',')[1]); };
+    reader.onload = () => resolve(reader.result.split(',')[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -90,7 +92,7 @@ async function chat(prompt, files) {
     } else {
       addErrorMessageToUI();
     }
-  } catch (error) {
+  } catch {
     removeTypingIndicator();
     addErrorMessageToUI();
   }
@@ -106,27 +108,11 @@ function addMessageToUI(turn) {
     const filesContainer = document.createElement('div');
     filesContainer.className = 'message-files';
 
-    if (turn.images && turn.images.length > 0) {
-      turn.images.forEach(image => {
-        const fileElement = document.createElement('div');
-        fileElement.className = 'message-file';
-
-        const img = document.createElement('img');
-        img.src = `data:${image.type};base64,${image.content}`;
-        img.className = 'message-image';
-        img.alt = 'Image';
-
-        const downloadLink = document.createElement('a');
-        downloadLink.href = img.src;
-        downloadLink.download = `image.${image.type.split('/')[1]}`;
-        downloadLink.appendChild(img);
-
-        fileElement.appendChild(downloadLink);
-        filesContainer.appendChild(fileElement);
-      });
+    if (turn.images?.length) {
+      turn.images.forEach(image => filesContainer.appendChild(createImageFileElement(image.type, image.content)));
     }
 
-    if (turn.files && turn.files.length > 0) {
+    if (turn.files?.length) {
       turn.files.forEach(file => {
         const fileElement = document.createElement('div');
         fileElement.className = 'message-file';
@@ -148,7 +134,6 @@ function addMessageToUI(turn) {
         fileElement.appendChild(downloadLink);
         filesContainer.appendChild(fileElement);
       });
-
     }
     messageDiv.appendChild(filesContainer);
   }
@@ -171,14 +156,30 @@ function addMessageToUI(turn) {
     timestampDiv.className = 'message-timestamp';
     const date = new Date(turn.timestamp);
     const options = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
-    const formattedDate = date.toLocaleString('en-GB', options);
-    timestampDiv.textContent = formattedDate;
+    timestampDiv.textContent = date.toLocaleString('en-GB', options);
     messageDiv.appendChild(timestampDiv);
   }
 
   chatContentContainer.appendChild(messageDiv);
   scrollChatContainer();
   return messageDiv;
+}
+
+function createImageFileElement(type, content) {
+  const fileElement = document.createElement('div');
+  fileElement.className = 'message-file';
+
+  const img = document.createElement('img');
+  img.src = `data:${type};base64,${content}`;
+  img.className = 'message-image';
+  img.alt = 'Image';
+
+  const downloadLink = document.createElement('a');
+  downloadLink.href = img.src;
+  downloadLink.download = `image.${type.split('/')[1]}`;
+  downloadLink.appendChild(img);
+  fileElement.appendChild(downloadLink);
+  return fileElement;
 }
 
 function showStopMessage(messageDiv, stopCommand) {
@@ -217,8 +218,7 @@ function addErrorMessageToUI() {
 
 async function handleFileSelection(e) {
   const files = Array.from(e.target.files);
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
-  const validFiles = files.filter(file => allowedTypes.includes(file.type) &&
+  const validFiles = files.filter(file => allowedFileTypes.includes(file.type) &&
     !selectedFiles.some(existing => existing.name === file.name && existing.size === file.size && existing.type === file.type));
 
   if (validFiles.length === 0) return;
@@ -266,38 +266,34 @@ function updateFilePreview() {
 }
 
 async function resizeFile(file) {
-  if (!file.type.startsWith('image/')) {
+  if (!file.type.startsWith('image/'))
     return file;
-  }
 
   const img = new Image();
   await new Promise(resolve => { img.onload = resolve; img.src = URL.createObjectURL(file); });
 
-  const MAX_SHORT = 768;
-  const MAX_LONG = 2000;
-  
   let width = img.width;
   let height = img.height;
-  
+
   const shortSide = Math.min(width, height);
   const longSide = Math.max(width, height);
-  
-  if (shortSide <= MAX_SHORT && longSide <= MAX_LONG) {
+
+  if (shortSide <= maxShortImageSide && longSide <= maxLongImageSide) {
     URL.revokeObjectURL(img.src);
     return file;
   }
-  
-  const ratio = Math.min(MAX_SHORT / shortSide, MAX_LONG / longSide);
+
+  const ratio = Math.min(maxShortImageSide / shortSide, maxLongImageSide / longSide);
   width = Math.round(width * ratio);
   height = Math.round(height * ratio);
-  
+
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  
+
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, width, height);
-  
+
   const blob = await new Promise(resolve => canvas.toBlob(resolve, file.type, 0.9));
   URL.revokeObjectURL(img.src);
   return new File([blob], file.name, { type: file.type });
@@ -318,7 +314,6 @@ function showTypingIndicator(isUser) {
 
 function removeTypingIndicator(isUser) {
   const indicator = document.getElementById('typing-indicator');
-  if (indicator && (!isUser || indicator.className === 'user')) {
+  if (indicator && (!isUser || indicator.className === 'user'))
     indicator.remove();
-  }
 }

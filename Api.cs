@@ -44,13 +44,12 @@ public static class Api
 
   public static void MapApiPaths(this WebApplication app)
   {
-    var group = app.MapGroup("/api").ValidateAntiforgery();
+    var group = app.MapGroup("/api").RequireAuthorization().ValidateAntiforgery();
 
-    group.MapPost("/chat", [Authorize] async ([FromForm] string id, [FromForm] string presetId, [FromForm] string prompt, [FromForm] IFormFileCollection files, HttpContext context) =>
+    group.MapPost("/chat", async ([FromForm] string id, [FromForm] string presetId, [FromForm] string prompt, [FromForm] IFormFileCollection files, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
-      var userGroup = UserGroup.ConfigByGroupName[userGroupName];
+      var (userGroupName, userGroup) = GetUserGroup(userEmail);
       var isReviewer = userGroup.Reviewers.Contains(userEmail);
       var isFirstTurn = string.IsNullOrEmpty(id);
 
@@ -143,16 +142,14 @@ public static class Api
         }
       }
       conversation.Turns.Add(userTurn);
-      var spendLimitReached = false;
 
-      var hasTemp = conversation.Preset.Temperature is not null;
       var chatClient = _aiClient.GetResponsesClient();
       var chatOptions = new CreateResponseOptions
       {
         Model = model.Name,
         EndUserId = id,
         Instructions = conversation.Preset.Instructions,
-        Temperature = hasTemp ? Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture) : null,
+        Temperature = conversation.Preset.Temperature is null ? null : Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture),
         ReasoningOptions = new() { ReasoningEffortLevel = conversation.Preset.ReasoningEffort },
         StoredOutputEnabled = false,
         StreamingEnabled = true
@@ -187,11 +184,9 @@ public static class Api
           $"Generate an image using {conversation.Preset.ImageModel}."));
       }
 
-      var responseItems = conversation.AsResponseItems();
-      foreach (var responseItem in responseItems)
-      {
+      foreach (var responseItem in conversation.AsResponseItems())
         chatOptions.InputItems.Add(responseItem);
-      }
+
       var responseStream = chatClient.CreateResponseStreamingAsync(chatOptions);
 
       return Results.Stream(async outputStream =>
@@ -300,11 +295,10 @@ public static class Api
             Images = images.Count > 0 ? images : null,
             EncryptedReasoningContent = encryptedReasoningContent.Count > 0 ? encryptedReasoningContent : null
           });
-          var cost = manualImageCost + (manualImageCost > 0
-            ? CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response))
-            : images.Count > 0
-              ? CalculateImageCost(imageModel, response.Usage, (userTurn.Images?.Count ?? 0) > 0)
-              : CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response)));
+          var responseCost = manualImageCost == 0 && images.Count > 0
+            ? CalculateImageCost(imageModel, response.Usage, (userTurn.Images?.Count ?? 0) > 0)
+            : CalculateCost(model, response.Usage, CountWebSearchCalls(response), CountFileSearchCalls(response));
+          var cost = manualImageCost + responseCost;
           if (isFirstTurn)
           {
             string title;
@@ -322,7 +316,7 @@ public static class Api
           }
           else
           {
-            var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
+            var existingCost = decimal.Parse(conversationEntity.Cost, CultureInfo.InvariantCulture);
             conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
             if (text == FlagToken)
             {
@@ -336,7 +330,7 @@ public static class Api
             ? Task.CompletedTask
             : TableService.UpsertReviewEntityAsync(conversationEntity, userGroupName);
           await Task.WhenAll(recordSpendTask, updateBlobTask, updateEntityTask, reviewTask);
-          spendLimitReached = (await recordSpendTask) >= userGroup.UserMaxWeeklySpend;
+          var spendLimitReached = (await recordSpendTask) >= userGroup.UserMaxWeeklySpend;
 
           if (isFirstTurn)
           {
@@ -355,7 +349,7 @@ public static class Api
       }, "text/plain; charset=utf-8");
     });
 
-    group.MapGet("/conversations/{id}", [Authorize] async (string id, HttpContext context) =>
+    group.MapGet("/conversations/{id}", async (string id, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
       var tableTask = TableService.ConversationExistsAsync(userEmail, id);
@@ -366,11 +360,10 @@ public static class Api
       return Results.Ok(conversation);
     });
 
-    group.MapGet("/conversations/{group}/{id}", [Authorize] async (string group, string id, HttpContext context) =>
+    group.MapGet("/conversations/{group}/{id}", async (string group, string id, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      if (!UserGroup.ConfigByGroupName.TryGetValue(group, out var groupConfig)) return Results.Forbid();
-      if (!groupConfig.Reviewers.Contains(userEmail)) return Results.Forbid();
+      if (!UserGroup.ConfigByGroupName.TryGetValue(group, out var groupConfig) || !groupConfig.Reviewers.Contains(userEmail)) return Results.Forbid();
       var tableTask = TableService.ReviewExistsAsync(group, id);
       var blobTask = BlobService.GetConversationAsync(id);
       var entityExists = await tableTask;
@@ -379,11 +372,10 @@ public static class Api
       return Results.Ok(conversation);
     });
 
-    group.MapDelete("/conversations/{id}", [Authorize] async (string id, HttpContext context) =>
+    group.MapDelete("/conversations/{id}", async (string id, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
-      var userGroup = UserGroup.ConfigByGroupName[userGroupName];
+      var (_, userGroup) = GetUserGroup(userEmail);
       var isReviewer = userGroup.Reviewers.Contains(userEmail);
       if (isReviewer)
       {
@@ -400,26 +392,25 @@ public static class Api
       return Results.NoContent();
     });
 
-    group.MapPost("/conversations/{group}/{id}/resolve", [Authorize] async (string group, string id, HttpContext context) =>
+    group.MapPost("/conversations/{group}/{id}/resolve", async (string group, string id, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      if (!UserGroup.ConfigByGroupName.TryGetValue(group, out var groupConfig)) return Results.Forbid();
-      if (!groupConfig.Reviewers.Contains(userEmail)) return Results.Forbid();
+      if (!UserGroup.ConfigByGroupName.TryGetValue(group, out var groupConfig) || !groupConfig.Reviewers.Contains(userEmail)) return Results.Forbid();
       await TableService.DeleteReviewEntityAsync(group, id);
       return Results.NoContent();
     });
 
-    group.MapGet("/refresh", [Authorize] async (HttpContext context) =>
+    group.MapGet("/refresh", async (HttpContext context) =>
     {
       if (!UserGroup.GroupNamesByReviewerEmail.Contains(context.User.Identity.Name)) return Results.Forbid();
       await BlobService.LoadConfigAsync();
       return Results.Content("Refreshed presets.", "text/plain");
     });
 
-    group.MapGet("/token", [Authorize] async ([FromQuery] string presetId, HttpContext context, IHttpClientFactory httpClientFactory) =>
+    group.MapGet("/token", async ([FromQuery] string presetId, HttpContext context, IHttpClientFactory httpClientFactory) =>
     {
       var userEmail = context.User.Identity.Name;
-      var userGroup = UserGroup.ConfigByGroupName[UserGroup.GroupNameByUserEmail[userEmail]];
+      var (_, userGroup) = GetUserGroup(userEmail);
 
       var spend = await TableService.GetSpendAsync(userEmail);
       if (spend >= userGroup.UserMaxWeeklySpend) return Results.StatusCode(429);
@@ -428,6 +419,7 @@ public static class Api
       {
         return Results.BadRequest("Invalid preset name.");
       }
+      if (!OpenAIConfig.Instance.Models.ContainsKey(OpenAIConfig.TranscriptionModelName)) return Results.StatusCode(503);
 
       var client = httpClientFactory.CreateClient("OpenAI");
       client.DefaultRequestHeaders.Add("api-key", OpenAIConfig.Instance.AIFoundryApiKey);
@@ -437,6 +429,7 @@ public static class Api
         {
           Model = preset.Model,
           Instructions = preset.Instructions,
+          Reasoning = string.IsNullOrWhiteSpace(preset.ReasoningEffort) ? null : new() { Effort = preset.ReasoningEffort },
           Audio = new() { Output = new() { Voice = preset.Voice } }
         }
       };
@@ -451,15 +444,14 @@ public static class Api
       return Results.Json(tokenResponse);
     });
 
-    group.MapPost("/record", [Authorize] async ([FromBody] RealtimeConversationEntry entry, HttpContext context) =>
+    group.MapPost("/record", async ([FromBody] RealtimeConversationEntry entry, HttpContext context) =>
     {
       var userEmail = context.User.Identity.Name;
-      var userGroupName = UserGroup.GroupNameByUserEmail[userEmail];
-      var userGroup = UserGroup.ConfigByGroupName[userGroupName];
-      var isReviewer = userGroup.Reviewers.Contains(userEmail);
+      var (userGroupName, userGroup) = GetUserGroup(userEmail);
       var isFirstTurn = string.IsNullOrEmpty(entry.CurrentChatId);
 
       if (entry is null) return Results.BadRequest("Entry cannot be null.");
+      if (!OpenAIConfig.Instance.Models.TryGetValue(OpenAIConfig.TranscriptionModelName, out var transcriptionModel)) return Results.StatusCode(503);
 
       string id = null;
       string title = null;
@@ -477,7 +469,7 @@ public static class Api
         {
           return Results.BadRequest("Model not supported.");
         }
-        cost = CalculateSpeechCost(model, entry);
+        cost = CalculateSpeechCost(model, transcriptionModel, entry);
 
         var summaryResponse = await SummariseAsync(null, entry.UserTranscript, id);
         cost += CalculateCost(OpenAIConfig.Instance.Models[OpenAIConfig.Instance.TitleSummarisationModel], summaryResponse.Usage);
@@ -497,8 +489,8 @@ public static class Api
           model = OpenAIConfig.Instance.Models.Values.First();
           conversation.Preset.Model = model.Name;
         }
-        cost = CalculateSpeechCost(model, entry);
-        var existingCost = decimal.Parse(conversationEntity.Cost.ToString(), CultureInfo.InvariantCulture);
+        cost = CalculateSpeechCost(model, transcriptionModel, entry);
+        var existingCost = decimal.Parse(conversationEntity.Cost, CultureInfo.InvariantCulture);
         conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
         await TableService.UpsertConversationAsync(conversationEntity);
       }
@@ -531,6 +523,12 @@ public static class Api
     });
   }
 
+  private static (string GroupName, UserGroup Config) GetUserGroup(string userEmail)
+  {
+    var name = UserGroup.GroupNameByUserEmail[userEmail];
+    return (name, UserGroup.ConfigByGroupName[name]);
+  }
+
   private static async Task<SummaryResponse> SummariseAsync(string presetTitle, string prompt, string id)
   {
     var summaryClient = _aiClient.GetResponsesClient();
@@ -560,16 +558,12 @@ public static class Api
 
   private static string GetSourcesMarkdown(ResponseResult response)
   {
-    var messageAnnotations = response.OutputItems
+    var uriCitations = response.OutputItems
       .OfType<MessageResponseItem>()
       .SelectMany(message => message.Content ?? [])
       .SelectMany(content => content.OutputTextAnnotations ?? [])
-      .ToList();
-
-    var uriCitations = messageAnnotations
       .OfType<UriCitationMessageAnnotation>()
-      .GroupBy(citation => citation.Uri)
-      .Select(group => group.First())
+      .DistinctBy(citation => citation.Uri)
       .ToList();
 
     if (uriCitations.Count == 0) return string.Empty;
@@ -590,15 +584,11 @@ public static class Api
     return sources.ToString();
   }
 
-  private static int CountWebSearchCalls(ResponseResult response)
-  {
-    return response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
-  }
+  private static int CountWebSearchCalls(ResponseResult response) =>
+    response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
 
-  private static int CountFileSearchCalls(ResponseResult response)
-  {
-    return response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
-  }
+  private static int CountFileSearchCalls(ResponseResult response) =>
+    response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
 
   private static List<ConversationTurnImage> GetGeneratedImages(ResponseResult response)
   {
@@ -647,8 +637,7 @@ public static class Api
         ImageTokenCount = inputDetails.GetProperty("image_tokens").GetInt32(),
         TextTokenCount = inputDetails.GetProperty("text_tokens").GetInt32()
       },
-      OutputTokenCount = usage.GetProperty("output_tokens").GetInt32(),
-      TotalTokenCount = usage.GetProperty("total_tokens").GetInt32()
+      OutputTokenCount = usage.GetProperty("output_tokens").GetInt32()
     };
   }
 
@@ -702,7 +691,7 @@ public static class Api
 #endif
   }
 
-  private static decimal CalculateSpeechCost(OpenAIModelConfig model, RealtimeConversationEntry entry)
+  private static decimal CalculateSpeechCost(OpenAIModelConfig model, OpenAIModelConfig transcriptionModel, RealtimeConversationEntry entry)
   {
 #if DEBUG
     return 0;
@@ -712,7 +701,10 @@ public static class Api
            (entry.OutputTextTokens * model.CostPer1MOutputTokens / 1_000_000m) +
            (entry.OutputAudioTokens * (model.CostPer1MAudioOutputTokens ?? 0) / 1_000_000m) +
            (entry.CachedInputTextTokens * model.CostPer1MCachedInputTokens / 1_000_000m) +
-           (entry.CachedInputAudioTokens * model.CostPer1MCachedInputTokens / 1_000_000m);
+           (entry.CachedInputAudioTokens * (model.CostPer1MAudioCachedInputTokens ?? model.CostPer1MCachedInputTokens) / 1_000_000m) +
+           (entry.TranscriptionInputTextTokens * transcriptionModel.CostPer1MInputTokens / 1_000_000m) +
+           (entry.TranscriptionInputAudioTokens * (transcriptionModel.CostPer1MAudioInputTokens ?? 0) / 1_000_000m) +
+           (entry.TranscriptionOutputTokens * transcriptionModel.CostPer1MOutputTokens / 1_000_000m);
 #endif
   }
 
@@ -722,7 +714,6 @@ public static class Api
   {
     public GeneratedImageInputTokenDetails InputTokenDetails { get; set; }
     public int OutputTokenCount { get; set; }
-    public int TotalTokenCount { get; set; }
   }
 
   private class GeneratedImageInputTokenDetails

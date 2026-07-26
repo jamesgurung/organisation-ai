@@ -2,15 +2,16 @@
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @inject IWebHostEnvironment Environment
 @{
-  var spendTask = TableService.GetSpendAsync(User.Identity.Name);
-  var historyTask = TableService.GetConversationsAsync(User.Identity.Name, true);
-  var reviewGroups = UserGroup.GroupNamesByReviewerEmail[User.Identity.Name].ToList();
+  var userEmail = User.Identity.Name;
+  var spendTask = TableService.GetSpendAsync(userEmail);
+  var historyTask = TableService.GetConversationsAsync(userEmail, true);
+  var reviewGroups = UserGroup.GroupNamesByReviewerEmail[userEmail].ToList();
   var reviewTask = reviewGroups.Count > 0 ? TableService.GetReviewEntitiesAsync(reviewGroups) : Task.FromResult<List<ReviewEntity>>(null);
   await Task.WhenAll(spendTask, historyTask, reviewTask);
   var spend = await spendTask;
   var history = await historyTask;
   var reviewItems = await reviewTask;
-  var userGroup = UserGroup.ConfigByGroupName[UserGroup.GroupNameByUserEmail[User.Identity.Name]];
+  var userGroup = UserGroup.ConfigByGroupName[UserGroup.GroupNameByUserEmail[userEmail]];
   var limitReached = spend >= userGroup.UserMaxWeeklySpend;
 }
 <div id="app-container">
@@ -21,9 +22,9 @@
       </a>
       @if (reviewGroups.Count > 0)
       {
-      <a id="usage-btn" class="icon-button" href="/usage">
-        <span class="material-symbols-rounded">bar_chart</span>
-      </a>
+        <a id="usage-btn" class="icon-button" href="/usage">
+          <span class="material-symbols-rounded">bar_chart</span>
+        </a>
       }
       <button id="new-chat-btn">
         <span class="material-symbols-rounded">add</span>
@@ -132,14 +133,17 @@
     let spendLimitReached = @limitReached.ToString().ToLowerInvariant();
   </script>
 
-  @if (Environment.IsDevelopment()) {
-  <script src="/js/main.js"></script>
-  <script src="/js/presets.js"></script>
-  <script src="/js/history.js"></script>
-  <script src="/js/chat.js"></script>
-  <script src="/js/streaming.js"></script>
-  <script src="/js/speech.js"></script>
-  } else {
-  <script src="/js/site.js"></script>
+  @if (Environment.IsDevelopment())
+  {
+    <script src="/js/main.js"></script>
+    <script src="/js/presets.js"></script>
+    <script src="/js/history.js"></script>
+    <script src="/js/chat.js"></script>
+    <script src="/js/streaming.js"></script>
+    <script src="/js/speech.js"></script>
+  }
+  else
+  {
+    <script src="/js/site.js"></script>
   }
 }

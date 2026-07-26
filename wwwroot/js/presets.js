@@ -1,6 +1,6 @@
 let currentPreset = null;
 
-async function displayPresets() {
+function displayPresets() {
   presetsContainer.innerHTML = '';
 
   const grouped = {};
@@ -16,20 +16,7 @@ async function displayPresets() {
     catHeader.className = 'preset-category-header';
     presetsContainer.appendChild(catHeader);
     grouped[category].forEach(preset => {
-      const presetItem = document.createElement('div');
-      presetItem.className = 'chat-list-item';
-      presetItem.tabIndex = 0;
-      const textDiv = document.createElement('div');
-      textDiv.className = 'chat-list-item-text';
-      textDiv.textContent = preset.title;
-      presetItem.appendChild(textDiv);
-      presetItem.addEventListener('click', () => applyPreset(preset, false));
-      presetItem.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          applyPreset(preset, false);
-        }
-      });
+      const presetItem = createListItem(preset.title, () => applyPreset(preset, false));
       presetsContainer.appendChild(presetItem);
     });
   });
@@ -51,23 +38,15 @@ function applyPreset(preset, isReviewing) {
     settingItemWebSearch.style.display = currentPreset.webSearch ? 'flex' : 'none';
     settingItemDocumentSearch.style.display = currentPreset.vectorStore ? 'flex' : 'none';
     settingItemImageGeneration.style.display = currentPreset.imageModel ? 'flex' : 'none';
-    instructionsDiv = instructionsPopup.querySelector('div');
+    const instructionsDiv = instructionsPopup.querySelector('div');
     instructionsDiv.textContent = currentPreset.instructions;
     instructionsDiv.scrollTop = 0;
   }
 
   chatContentContainer.innerHTML = '';
   welcomeMessage.style.display = currentPreset.introduction ? 'none' : 'block';
-  const activeChats = document.querySelectorAll('.chat-list-item.active');
-  activeChats.forEach(chat => chat.classList.remove('active'));
-  const presetItems = document.querySelectorAll('.chat-list-item');
-  presetItems.forEach(item => {
-    if (item.textContent === currentPreset.title && !isReviewing) {
-      item.classList.add('active');
-    } else {
-      item.classList.remove('active');
-    }
-  });
+  document.querySelectorAll('.chat-list-item').forEach(item =>
+    item.classList.toggle('active', item.textContent === currentPreset.title && !isReviewing));
 
   longChatWarning.style.display = 'none';
   inputContainer.style.display = isReviewing ? 'none' : 'block';
@@ -110,17 +89,17 @@ function startNewChat() {
   const defaultPreset = presets.find(preset => preset.id === 'default');
   if (defaultPreset) {
     applyPreset(defaultPreset, false);
-  } else {
-    chatContentContainer.innerHTML = '';
-    welcomeMessage.style.display = 'block';
-    userInput.value = '';
-    sendBtn.disabled = true;
-    userInput.placeholder = 'Select a tool.';
-    const activeChats = document.querySelectorAll('.chat-list-item.active');
-    activeChats.forEach(chat => chat.classList.remove('active'));
-    if (window.innerWidth <= smallScreenBreakpoint) sidebar.classList.remove('open');
-    disableInput();
-    settingsDisplay.style.display = 'none';
-    switchTab('presets');
+    return;
   }
+
+  chatContentContainer.innerHTML = '';
+  welcomeMessage.style.display = 'block';
+  userInput.value = '';
+  sendBtn.disabled = true;
+  userInput.placeholder = 'Select a tool.';
+  document.querySelectorAll('.chat-list-item.active').forEach(chat => chat.classList.remove('active'));
+  if (window.innerWidth <= smallScreenBreakpoint) sidebar.classList.remove('open');
+  disableInput();
+  settingsDisplay.style.display = 'none';
+  switchTab('presets');
 }

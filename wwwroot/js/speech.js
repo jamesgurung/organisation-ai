@@ -5,6 +5,7 @@ let realtimeEventsFiltered = false;
 async function startRealtimeSpeech() {
   stopRealtimeSpeech();
   const tokenResponse = await fetch(`/api/token?presetId=${currentPreset.id}`);
+  if (!tokenResponse.ok) return false;
   const tokenData = await tokenResponse.json();
   const realtimeToken = tokenData.value ?? tokenData.client_secret?.value;
   realtimeEventsFiltered = tokenData.realtime_endpoint.includes('webrtcfilter=on');
@@ -19,7 +20,7 @@ async function startRealtimeSpeech() {
   peerConnection.addTrack(micStream.getTracks()[0]);
 
   const dataChannel = peerConnection.createDataChannel('oai-events');
-  dataChannel.addEventListener('message', (e) => { handleRealtimeSpeechEvent(JSON.parse(e.data)); });
+  dataChannel.addEventListener('message', e => handleRealtimeSpeechEvent(JSON.parse(e.data)));
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
@@ -27,11 +28,12 @@ async function startRealtimeSpeech() {
   const sdpResponse = await fetch(tokenData.realtime_endpoint, {
     method: 'POST',
     body: offer.sdp,
-    headers: { Authorization: `Bearer ${realtimeToken}`, 'Content-Type': 'application/sdp' },
+    headers: { Authorization: `Bearer ${realtimeToken}`, 'Content-Type': 'application/sdp' }
   });
 
   await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
   speechInProgress = true;
+  return true;
 }
 
 function stopRealtimeSpeech() {
@@ -52,12 +54,15 @@ function stopRealtimeSpeech() {
 
 let audioUserTranscript = '';
 let audioAssistantTranscript = '';
+let audioAssistantTranscriptParts = [];
 let assistantHasResponded = false;
 let assistantTranscriptDisplayed = false;
 let audioTurnRecorded = false;
+let transcriptionInputAudioTokens = 0;
+let transcriptionInputTextTokens = 0;
+let transcriptionOutputTokens = 0;
 
 async function handleRealtimeSpeechEvent(data) {
-  console.log(data);
   switch (data.type) {
     case 'input_audio_buffer.speech_started':
       assistantHasResponded = false;
@@ -65,19 +70,26 @@ async function handleRealtimeSpeechEvent(data) {
       showAssistantTranscript();
       audioUserTranscript = '';
       audioAssistantTranscript = '';
+      audioAssistantTranscriptParts = [];
       assistantTranscriptDisplayed = false;
       audioTurnRecorded = false;
+      transcriptionInputAudioTokens = 0;
+      transcriptionInputTextTokens = 0;
+      transcriptionOutputTokens = 0;
       showTypingIndicator(true);
       break;
     case 'conversation.item.input_audio_transcription.completed':
       removeTypingIndicator(true);
       audioUserTranscript = data.transcript;
+      transcriptionInputAudioTokens = data.usage?.input_token_details?.audio_tokens ?? 0;
+      transcriptionInputTextTokens = data.usage?.input_token_details?.text_tokens ?? 0;
+      transcriptionOutputTokens = data.usage?.output_tokens ?? 0;
       addMessageToUI({ role: 'user', text: audioUserTranscript });
       if (!assistantHasResponded) showTypingIndicator();
       break;
     case 'response.output_audio_transcript.done':
-      audioAssistantTranscript = data.transcript;
-      if (realtimeEventsFiltered) await recordRealtimeTurn();
+      audioAssistantTranscriptParts[data.output_index ?? audioAssistantTranscriptParts.length] = data.transcript;
+      audioAssistantTranscript = audioAssistantTranscriptParts.filter(Boolean).join(' ');
       break;
     case 'response.done':
       audioAssistantTranscript ||= getAssistantTranscript(data.response);
@@ -92,6 +104,7 @@ async function handleRealtimeSpeechEvent(data) {
       assistantHasResponded = true;
       removeTypingIndicator();
       showAssistantTranscript();
+      if (realtimeEventsFiltered) await recordRealtimeTurn();
       break;
   }
 }
@@ -107,9 +120,8 @@ async function recordRealtimeTurn(usage) {
   const outputAudioTokens = usage?.output_token_details?.audio_tokens ?? 0;
   const outputTextTokens = usage?.output_token_details?.text_tokens ?? 0;
 
-  while (!audioUserTranscript) {
+  while (!audioUserTranscript)
     await new Promise(resolve => setTimeout(resolve, 100));
-  }
 
   const response = await fetch('/api/record', {
     method: 'POST',
@@ -123,6 +135,9 @@ async function recordRealtimeTurn(usage) {
       cachedInputTextTokens,
       outputAudioTokens,
       outputTextTokens,
+      transcriptionInputAudioTokens,
+      transcriptionInputTextTokens,
+      transcriptionOutputTokens,
       userTranscript: audioUserTranscript,
       assistantTranscript: audioAssistantTranscript
     })
@@ -167,7 +182,8 @@ function getAssistantTranscript(response) {
   return response?.output
     ?.flatMap(output => output.content ?? [])
     .map(content => content.transcript ?? content.audio?.transcript)
-    .find(Boolean);
+    .filter(Boolean)
+    .join(' ');
 }
 
 speakBtn.addEventListener('click', async () => {
@@ -175,17 +191,19 @@ speakBtn.addEventListener('click', async () => {
     stopRealtimeSpeech();
     speakBtn.style.display = 'none';
     restartSpeakBtn.style.display = 'inline-block';
-  } else {
-    welcomeMessage.style.display = 'none';
-    if (currentChatId === null) chatContentContainer.innerHTML = '';
-    speakBtn.disabled = true;
-    speakBtn.textContent = 'Starting...';
-    await startRealtimeSpeech();
-    speakBtn.disabled = false;
-    speakBtn.textContent = 'Stop Voice Chat';
+    return;
   }
+
+  welcomeMessage.style.display = 'none';
+  if (currentChatId === null) chatContentContainer.innerHTML = '';
+  speakBtn.disabled = true;
+  speakBtn.textContent = 'Starting...';
+  if (!await startRealtimeSpeech()) {
+    speakBtn.textContent = 'Voice unavailable.';
+    return;
+  }
+  speakBtn.disabled = false;
+  speakBtn.textContent = 'Stop Voice Chat';
 });
 
-restartSpeakBtn.addEventListener('click', async () => {
-  applyPreset(currentPreset);
-});
+restartSpeakBtn.addEventListener('click', () => applyPreset(currentPreset));

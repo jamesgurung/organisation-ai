@@ -94,7 +94,6 @@ a, a:active, a:focus, a:visited {
 
 a:hover {
   text-decoration: underline;
-  color: var(--primary-color);
 }
 
 button {
@@ -165,13 +164,7 @@ button {
   }
 
   .main-content {
-    margin-left: 0;
     padding: 10px 20px 0 20px !important;
-  }
-
-  #app-container {
-    display: flex;
-    flex-direction: row;
   }
 
   #new-chat-btn {
@@ -299,13 +292,11 @@ button {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  margin-left: 0;
   width: 100%;
   padding: 10px 0 0;
 }
 
 .main-content.landing-centered {
-  display: flex;
   align-items: center;
   justify-content: center;
   height: 90dvh;
@@ -359,7 +350,6 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  text-decoration: none;
   margin-top: 24px;
   max-width: fit-content;
 }
@@ -373,7 +363,7 @@ button {
 #welcome-message {
   text-align: center;
   margin-top: 60px;
-  padding: 0px 20px;
+  padding: 0 20px;
 }
 
 #welcome-message h1 {
@@ -475,12 +465,7 @@ button {
 
 #send-btn:disabled {
   cursor: default;
-  color: var(--placeholder-color)
-}
-
-#send-btn svg {
-  width: 18px;
-  height: 18px;
+  color: var(--placeholder-color);
 }
 
 #file-upload {
@@ -576,7 +561,6 @@ button {
   display: flex;
   align-items: center;
   padding: 15px;
-  background-color: var(--assistant-msg-bg);
   border-radius: 8px;
   border-bottom-left-radius: 0;
   align-self: flex-start;
@@ -608,7 +592,6 @@ button {
   border-bottom-left-radius: 8px;
   border-bottom-right-radius: 0;
   align-self: flex-end;
-  margin-bottom: 20px;
   border: 1px solid var(--user-msg-border);
 }
 
@@ -666,7 +649,6 @@ button {
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-color);
-  transition: opacity 0.2s ease;
 }
 
 #system-prompt-popup h2 {
@@ -754,18 +736,14 @@ button {
   margin-bottom: 12px;
 }
 
-.message a,
-message a:active,
-message a:hover,
-message a:focus,
-message a:visited {
+.message a {
   color: var(--primary-color);
   text-decoration: none;
 }
 
 .message ul,
 .message ol {
-  margin: 8px 0 18px 0;
+  margin: 8px 0 18px;
   padding-left: 36px;
 }
 
@@ -862,8 +840,6 @@ message a:visited {
 .search-in-progress {
   color: var(--search-progress-color);
   background-color: var(--search-progress-bg);
-  display: flex;
-  align-items: center;
 }
 
 .search-in-progress .material-symbols-rounded {
@@ -907,7 +883,6 @@ message a:visited {
 
 .assistant-message .message-file,
 .assistant-message .message-file a {
-  align-items: stretch;
   display: block;
   width: 100%;
 }
@@ -1037,7 +1012,7 @@ button.resolve:disabled {
   width: fit-content;
   padding: 4px 20px;
   font-size: 9pt;
-  border-radius: 20px 20px 0 0
+  border-radius: 20px 20px 0 0;
 }
 
 .message:hover .message-timestamp {

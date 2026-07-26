@@ -6,30 +6,30 @@ namespace OrgAI;
 
 public static class BlobService
 {
+  private static BlobContainerClient _conversationsClient;
+  private static BlobContainerClient _configClient;
+  private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
   public static void Configure(string connectionString)
   {
     var blobClient = new BlobServiceClient(connectionString);
-    conversationsClient = blobClient.GetBlobContainerClient("conversations");
-    configClient = blobClient.GetBlobContainerClient("config");
+    _conversationsClient = blobClient.GetBlobContainerClient("conversations");
+    _configClient = blobClient.GetBlobContainerClient("config");
   }
-
-  private static BlobContainerClient conversationsClient;
-  private static BlobContainerClient configClient;
-  private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
   public static async Task CreateOrUpdateConversationAsync(string conversationId, Conversation conversation)
   {
     ArgumentNullException.ThrowIfNull(conversationId);
     ArgumentNullException.ThrowIfNull(conversation);
     var contents = JsonSerializer.Serialize(conversation);
-    var blob = conversationsClient.GetBlobClient(conversationId);
+    var blob = _conversationsClient.GetBlobClient(conversationId);
     await blob.UploadAsync(new BinaryData(contents), overwrite: true);
   }
 
   public static async Task<Conversation> GetConversationAsync(string conversationId)
   {
     ArgumentNullException.ThrowIfNull(conversationId);
-    var blob = conversationsClient.GetBlobClient(conversationId);
+    var blob = _conversationsClient.GetBlobClient(conversationId);
     try
     {
       var response = await blob.DownloadContentAsync();
@@ -45,13 +45,13 @@ public static class BlobService
   public static async Task DeleteConversationAsync(string conversationId)
   {
     ArgumentNullException.ThrowIfNull(conversationId);
-    var blob = conversationsClient.GetBlobClient(conversationId);
+    var blob = _conversationsClient.GetBlobClient(conversationId);
     await blob.DeleteIfExistsAsync();
   }
 
   public static async Task LoadConfigAsync()
   {
-    var usersData = await configClient.GetBlobClient("users.csv").DownloadContentAsync();
+    var usersData = await _configClient.GetBlobClient("users.csv").DownloadContentAsync();
     UserGroup.GroupNameByUserEmail = usersData.Value.Content.ToString().Trim().Split('\n').Skip(1).Select(line => line.Split(','))
       .ToDictionary(o => o[0].ToLowerInvariant().Trim(), o => o[1].ToLowerInvariant().Trim());
 
@@ -59,7 +59,7 @@ public static class BlobService
     UserGroup.ConfigByGroupName = new Dictionary<string, UserGroup>(userGroupNames.Count);
     foreach (var userGroupName in userGroupNames)
     {
-      var blob = configClient.GetBlobClient($"{userGroupName}.json");
+      var blob = _configClient.GetBlobClient($"{userGroupName}.json");
       try
       {
         var response = await blob.DownloadContentAsync();
@@ -72,18 +72,16 @@ public static class BlobService
         }
         else
         {
-          var redactedPresets = new List<Preset>();
-          foreach (var preset in userGroup.Presets)
-          {
-            redactedPresets.Add(new Preset
+          var redactedPresets = userGroup.Presets
+            .Select(preset => new Preset
             {
               Id = preset.Id,
               Title = preset.Title,
               Category = preset.Category,
               Introduction = preset.Introduction,
               Voice = preset.Voice
-            });
-          }
+            })
+            .ToList();
           userGroup.PresetJson = JsonSerializer.Serialize(redactedPresets);
         }
         userGroup.StopCommands ??= [];
@@ -105,7 +103,7 @@ public static class BlobService
       .SelectMany(g => g.Value.Reviewers, (g, r) => new { ReviewerEmail = r, GroupName = g.Key })
       .ToLookup(o => o.ReviewerEmail, o => o.GroupName, StringComparer.OrdinalIgnoreCase);
 
-    var modelsData = await configClient.GetBlobClient("models.json").DownloadContentAsync();
+    var modelsData = await _configClient.GetBlobClient("models.json").DownloadContentAsync();
     var models = JsonSerializer.Deserialize<List<OpenAIModelConfig>>(modelsData.Value.Content.ToString(), _jsonOptions);
     OpenAIConfig.Instance.Models = models.ToDictionary(m => m.Name, m => m);
   }
@@ -113,7 +111,7 @@ public static class BlobService
   public static async Task UpdateUsersAsync(string csvContent)
   {
     ArgumentNullException.ThrowIfNull(csvContent);
-    var blob = configClient.GetBlobClient("users.csv");
+    var blob = _configClient.GetBlobClient("users.csv");
     await blob.UploadAsync(new BinaryData(csvContent), true);
   }
 }

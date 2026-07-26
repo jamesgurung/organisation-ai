@@ -19,7 +19,7 @@
 ## Code Style
 
 - Match the existing codebase style, structure, naming, and patterns.
-- Use 2-space indentation, spaces not tabs, CRLF line endings, and a final newline.
+- Use 2-space indentation, spaces not tabs, and a final newline. Don't worry about line endings as they will be normalized by git.
 - Avoid adding small helper methods that are only called once. Prefer inline code when it is clear and concise.
 - Use small defensive guards only when essential to prevent errors. Avoid over-engineering.
 - When writing C#, prefer:

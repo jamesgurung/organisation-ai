@@ -28,18 +28,16 @@ Api.Configure();
 await BlobService.LoadConfigAsync();
 
 builder.ConfigureAuth();
-builder.Services.AddResponseCompression(options => { options.EnableForHttps = true; });
-builder.Services.AddAntiforgery(options => { options.HeaderName = "X-XSRF-TOKEN"; });
-builder.Services.Configure<RouteOptions>(options => { options.LowercaseUrls = true; });
-builder.Services.Configure<JsonOptions>(options => { options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; });
-builder.Services.AddRazorPages(options => { options.Conventions.AllowAnonymousToFolder("/auth"); });
+builder.Services.AddResponseCompression(options => options.EnableForHttps = true);
+builder.Services.AddAntiforgery(options => options.HeaderName = "X-XSRF-TOKEN");
+builder.Services.Configure<RouteOptions>(options => options.LowercaseUrls = true);
+builder.Services.Configure<JsonOptions>(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
+builder.Services.AddRazorPages(options => options.Conventions.AllowAnonymousToFolder("/auth"));
 
-builder.Services.AddHttpClient("OpenAI", client => { client.BaseAddress = Api.GetFoundryOpenAIEndpoint(); });
-
-var minify = !builder.Environment.IsDevelopment();
+builder.Services.AddHttpClient("OpenAI", client => client.BaseAddress = Api.GetFoundryOpenAIEndpoint());
 builder.Services.AddWebOptimizer(pipeline =>
 {
-  if (minify)
+  if (!builder.Environment.IsDevelopment())
   {
     pipeline.MinifyCssFiles("css/*.css");
     pipeline.MinifyJsFiles("js/*.js");
@@ -59,15 +57,16 @@ if (!app.Environment.IsDevelopment())
     {
       await TableService.WarmUpAsync();
       context.Response.StatusCode = 200;
+      return;
     }
-    else if (!context.Request.Host.Host.Equals(Organisation.Instance.AppWebsite, StringComparison.OrdinalIgnoreCase))
+
+    if (!context.Request.Host.Host.Equals(Organisation.Instance.AppWebsite, StringComparison.OrdinalIgnoreCase))
     {
       context.Response.Redirect($"https://{Organisation.Instance.AppWebsite}{context.Request.Path.Value}{context.Request.QueryString}", true);
+      return;
     }
-    else
-    {
-      await next();
-    }
+
+    await next();
   });
 }
 

@@ -19,7 +19,8 @@
       "category": "General",
       "instructions": "You are an experienced and engaging assistant talking to a member of staff at a UK secondary school. Your goal is to give helpful advice.\n\nKeep your answers **very short and concise**. Use British English terminology.",
       "introduction": null,
-      "model": "gpt-realtime-1.5",
+      "model": "gpt-realtime-2.1",
+      "reasoningEffort": "low",
       "voice": "marin"
     },
     {

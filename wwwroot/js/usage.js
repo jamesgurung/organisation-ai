@@ -6,15 +6,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let weeklyChart = null;
   let totalChart = null;
-  let groupColors = {};
-  let filters = {};
+  const groupColors = {};
+  const filters = {};
+  let resizeTimeout;
 
   const colorPalette = ['#5e5ce6', '#dc3912', '#109618', '#ff9900', '#990099', '#0099c6', '#dd4477', '#316395', '#22aa99', '#aaaa11', '#6633cc', '#e67300', '#8b0707',
     '#651067', '#329262', '#5574a6', '#3b3eac', '#b77322', '#16d620', '#b91383', '#f4359e', '#9c5935', '#a9c413', '#2a778d', '#668d1c', '#bea413', '#0c5922', '#743411'];
 
   const formatCurrency = value => value.toFixed(2);
 
-  const init = async () => {
+  const init = () => {
     if (spendData.length > 0) {
       assignGroupColors();
       populateDropdowns();
@@ -25,8 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
       groupSelect.addEventListener('change', handleFilterChange);
 
       window.addEventListener('resize', () => {
-        clearTimeout(window.resizeTimeout);
-        window.resizeTimeout = setTimeout(() => { renderCharts(); }, 200);
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(renderCharts, 200);
       });
     } else {
       document.getElementById('content').innerHTML = '<div style="text-align: center; margin-bottom: 30px">Unavailable</div>';
@@ -90,15 +91,11 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCharts();
   };
 
-  const applyFilters = data => {
-    let filtered = [...data];
-
-    filtered = filtered.filter(item => item.week >= filters.selectedStart);
-    filtered = filtered.filter(item => item.week <= filters.selectedEnd);
-    if (filters.selectedGroup !== 'all') filtered = filtered.filter(item => item.group === filters.selectedGroup);
-
-    return filtered;
-  };
+  const applyFilters = data =>
+    data.filter(item =>
+      item.week >= filters.selectedStart &&
+      item.week <= filters.selectedEnd &&
+      (filters.selectedGroup === 'all' || item.group === filters.selectedGroup));
 
   const renderCharts = () => {
     const filteredData = applyFilters(spendData);
@@ -112,25 +109,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const groups = [...new Set(data.map(item => item.group))];
 
     const datasets = groups.map(group => {
-      const groupData = weeks.map(week => {
-        return data
-          .filter(item => item.week === week && item.group === group)
-          .reduce((sum, item) => sum + parseFloat(item.spend), 0);
-      });
+      const groupData = weeks.map(week => data
+        .filter(item => item.week === week && item.group === group)
+        .reduce((sum, item) => sum + parseFloat(item.spend), 0));
 
       return {
         label: group,
         data: groupData,
         backgroundColor: groupColors[group],
-        borderColor: groupColors[group],
         borderWidth: 2,
         borderColor: 'white'
       };
     });
 
-    if (weeklyChart) {
+    if (weeklyChart)
       weeklyChart.destroy();
-    }
 
     const weeklyChartCtx = document.getElementById('weeklySpendChart').getContext('2d');
     weeklyChart = new Chart(weeklyChartCtx, {
@@ -179,18 +172,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const groupTotals = {};
     data.forEach(item => {
-      if (!groupTotals[item.group]) {
-        groupTotals[item.group] = 0;
-      }
-      groupTotals[item.group] += parseFloat(item.spend);
+      groupTotals[item.group] = (groupTotals[item.group] ?? 0) + parseFloat(item.spend);
     });
 
-    const chartData = groups.map(group => groupTotals[group] || 0);
-    const backgroundColors = groups.map(group => groupColors[group]);
-
-    if (totalChart) {
+    if (totalChart)
       totalChart.destroy();
-    }
 
     const totalChartCtx = document.getElementById('totalSpendChart').getContext('2d');
     totalChart = new Chart(totalChartCtx, {
@@ -198,8 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
       data: {
         labels: groups,
         datasets: [{
-          data: chartData,
-          backgroundColor: backgroundColors,
+          data: groups.map(group => groupTotals[group] || 0),
+          backgroundColor: groups.map(group => groupColors[group]),
           borderWidth: 2,
           borderColor: 'white'
         }]
@@ -243,25 +229,16 @@ document.addEventListener('DOMContentLoaded', () => {
       userSpends[item.user].total += parseFloat(item.spend);
     });
 
-    const sortedUsers = Object.values(userSpends)
-      .sort((a, b) => b.total - a.total);
-
     const fragment = document.createDocumentFragment();
 
-    sortedUsers.forEach(user => {
+    Object.values(userSpends).sort((a, b) => b.total - a.total).forEach(user => {
       const row = document.createElement('tr');
 
-      const userCell = document.createElement('td');
-      userCell.textContent = user.user;
-      row.appendChild(userCell);
-
-      const groupCell = document.createElement('td');
-      groupCell.textContent = user.group;
-      row.appendChild(groupCell);
-
-      const totalCell = document.createElement('td');
-      totalCell.textContent = `$${formatCurrency(user.total)}`;
-      row.appendChild(totalCell);
+      [user.user, user.group, `$${formatCurrency(user.total)}`].forEach(text => {
+        const cell = document.createElement('td');
+        cell.textContent = text;
+        row.appendChild(cell);
+      });
 
       fragment.appendChild(row);
     });

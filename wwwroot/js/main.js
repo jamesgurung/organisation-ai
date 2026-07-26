@@ -25,21 +25,29 @@ const settingItemDocumentSearch = document.getElementById('setting-item-document
 const settingItemImageGeneration = document.getElementById('setting-item-image-generation');
 const instructionsIcon = document.getElementById('system-prompt-icon');
 const instructionsPopup = document.getElementById('system-prompt-popup');
+const instructionsCloseBtn = document.getElementById('system-prompt-close-btn');
 const welcomeMessage = document.getElementById('welcome-message');
+const introTextElement = document.getElementById('intro-text');
 const mobileSidebarToggle = document.getElementById('mobile-sidebar-toggle');
 const sendBtn = document.getElementById('send-btn');
 const fileLabel = document.getElementById('file-label');
+const fileUpload = document.getElementById('file-upload');
 const inputContainer = document.getElementById('input-container');
 const userElement = document.getElementById('user');
 const reviewBadge = document.getElementById('review-badge');
 const longChatWarning = document.getElementById('long-chat-warning');
 const smallScreenBreakpoint = 1200;
+const sidebarTabs = [
+  { name: 'presets', button: presetsTab, content: presetsContainer },
+  { name: 'history', button: historyTab, content: historyContainer },
+  { name: 'review', button: reviewTab, content: reviewContainer }
+];
 
 const headers = { 'X-XSRF-TOKEN': antiforgeryToken };
 
 let isScrolledToBottom = true;
 
-chatContainer.addEventListener('scroll', function() {
+chatContainer.addEventListener('scroll', () => {
   isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 30;
 });
 
@@ -61,28 +69,31 @@ function closeSidebarIfOpen(e) {
 }
 
 function switchTab(tab) {
-  if (tab === 'presets') {
-    presetsTab.classList.add('active');
-    historyTab.classList.remove('active');
-    reviewTab.classList.remove('active');
-    presetsContainer.style.display = 'block';
-    historyContainer.style.display = 'none';
-    reviewContainer.style.display = 'none';
-  } else if (tab === 'history') {
-    historyTab.classList.add('active');
-    presetsTab.classList.remove('active');
-    reviewTab.classList.remove('active');
-    presetsContainer.style.display = 'none';
-    historyContainer.style.display = 'block';
-    reviewContainer.style.display = 'none';
-  } else {
-    reviewTab.classList.add('active');
-    presetsTab.classList.remove('active');
-    historyTab.classList.remove('active');
-    presetsContainer.style.display = 'none';
-    historyContainer.style.display = 'none';
-    reviewContainer.style.display = 'block';
-  }
+  const selectedTab = tab === 'presets' || tab === 'history' ? tab : 'review';
+  sidebarTabs.forEach(({ name, button, content }) => {
+    const isSelected = name === selectedTab;
+    button.classList.toggle('active', isSelected);
+    content.style.display = isSelected ? 'block' : 'none';
+  });
+}
+
+function createListItem(text, onActivate) {
+  const item = document.createElement('div');
+  item.className = 'chat-list-item';
+  item.tabIndex = 0;
+
+  const textElement = document.createElement('div');
+  textElement.className = 'chat-list-item-text';
+  textElement.textContent = text;
+  item.appendChild(textElement);
+
+  item.addEventListener('click', onActivate);
+  item.addEventListener('keydown', e => {
+    if (e.target !== item || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    onActivate();
+  });
+  return item;
 }
 
 function toggleInstructionsPopup() {
@@ -99,9 +110,8 @@ function toggleInstructionsPopup() {
 }
 
 function closePopupOnClickOutside(e) {
-  if (e.target !== instructionsIcon && !instructionsPopup.contains(e.target)) {
+  if (e.target !== instructionsIcon && !instructionsPopup.contains(e.target))
     hideInstructionsPopup();
-  }
 }
 
 function hideInstructionsPopup() {
@@ -128,7 +138,7 @@ function focusInput() {
   setTimeout(() => { userInput.readOnly = false; }, 10);
 }
 
-async function init() {
+function init() {
   chatForm.addEventListener('submit', handleSubmit);
   mobileSidebarToggle.addEventListener('click', toggleSidebar);
   newChatBtn.addEventListener('click', startNewChat);
@@ -137,9 +147,8 @@ async function init() {
   historyTab.addEventListener('click', () => switchTab('history'));
   reviewTab.addEventListener('click', () => switchTab('review'));
   instructionsIcon.addEventListener('click', toggleInstructionsPopup);
-  const sysCloseBtn = document.getElementById('system-prompt-close-btn');
-  sysCloseBtn.addEventListener('click', hideInstructionsPopup);
-  document.getElementById('intro-text').innerHTML = markdownToHtml(introText);
+  instructionsCloseBtn.addEventListener('click', hideInstructionsPopup);
+  introTextElement.innerHTML = markdownToHtml(introText);
   reviewTab.style.display = reviewItems !== null ? 'block' : 'none';
 
   if (!showPresetDetails) {
@@ -147,30 +156,19 @@ async function init() {
     chatContainer.style.paddingTop = '15px';
   }
 
-  if (!allowUploads) {
-    document.getElementById('file-upload').style.display = 'none';
-  }
+  if (!allowUploads) fileUpload.style.display = 'none';
 
-  userInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      if (e.ctrlKey || e.altKey || e.shiftKey) {
-        return;
-      } else {
-        e.preventDefault();
-        chatForm.dispatchEvent(new Event('submit'));
-      }
-    }
+  userInput.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    chatForm.dispatchEvent(new Event('submit'));
   });
 
-  userInput.addEventListener('input', function () {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
-    if (this.scrollHeight > 200) {
-      this.style.overflowY = 'auto';
-    } else {
-      this.style.overflowY = 'hidden';
-    }
-    sendBtn.disabled = this.value.trim().length === 0;
+  userInput.addEventListener('input', () => {
+    userInput.style.height = 'auto';
+    userInput.style.height = `${userInput.scrollHeight}px`;
+    userInput.style.overflowY = userInput.scrollHeight > 200 ? 'auto' : 'hidden';
+    sendBtn.disabled = userInput.value.trim().length === 0;
   });
 
   document.addEventListener('click', closeSidebarIfOpen);
@@ -183,8 +181,8 @@ async function init() {
     refreshReviewUI();
   }
 
-  await displayPresets();
-  await refreshHistoryUI();
+  displayPresets();
+  refreshHistoryUI();
   startNewChat();
   focusInput();
 }

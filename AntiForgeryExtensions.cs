@@ -8,10 +8,8 @@ public static class AntiForgeryExtensions
   {
     return builder.AddEndpointFilter(async (context, next) =>
     {
-      if (context.HttpContext.Request.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
-      {
+      if (HttpMethods.IsGet(context.HttpContext.Request.Method))
         return await next(context);
-      }
 
       try
       {

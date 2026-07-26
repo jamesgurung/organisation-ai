@@ -61,15 +61,19 @@ h1 {
   }
 }
 
-.chart-box {
+.chart-box,
+.users-container {
   background-color: var(--bg-color);
   border: 1px solid var(--border-color);
   padding: 15px;
+}
+
+.chart-box {
   width: 100%;
 }
 
-.chart-box h2 {
-  margin-top: 0;
+.chart-box h2,
+.users-container h2 {
   margin-bottom: 15px;
   font-size: 18px;
 }
@@ -77,18 +81,6 @@ h1 {
 .chart-container {
   aspect-ratio: 4 / 3;
   width: 100%;
-}
-
-.users-container {
-  background-color: var(--bg-color);
-  border: 1px solid var(--border-color);
-  padding: 15px;
-}
-
-.users-container h2 {
-  margin-top: 0;
-  margin-bottom: 15px;
-  font-size: 18px;
 }
 
 #usersTable {

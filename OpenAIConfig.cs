@@ -10,6 +10,7 @@ public class OpenAIModelConfig
   public decimal? CostPer1MImageCachedInputTokens { get; init; }
   public decimal? CostPer1MImageOutputTokens { get; init; }
   public decimal? CostPer1MAudioInputTokens { get; init; }
+  public decimal? CostPer1MAudioCachedInputTokens { get; init; }
   public decimal? CostPer1MAudioOutputTokens { get; init; }
   public decimal? CostPer1KWebSearchCalls { get; init; }
   public decimal? CostPer1KFileSearchCalls { get; init; }
@@ -17,6 +18,8 @@ public class OpenAIModelConfig
 
 public class OpenAIConfig
 {
+  public const string TranscriptionModelName = "gpt-4o-mini-transcribe";
+
   public static OpenAIConfig Instance { get; set; }
 
   public string AIFoundryApiKey { get; set; }

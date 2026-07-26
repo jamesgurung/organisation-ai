@@ -11,14 +11,11 @@ WORKDIR /src
 COPY OrgAI.csproj .
 RUN dotnet restore OrgAI.csproj
 COPY . .
-RUN dotnet build OrgAI.csproj -c Release -o /app/build
-
-FROM build AS publish
-RUN dotnet publish OrgAI.csproj -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish OrgAI.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
 ARG GITHUB_RUN_NUMBER
 ENV GITHUB_RUN_NUMBER=$GITHUB_RUN_NUMBER
-COPY --from=publish /app/publish .
+COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "OrgAI.dll"]
