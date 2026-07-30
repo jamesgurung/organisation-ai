@@ -73,6 +73,8 @@ public class ConversationTurn
   public IList<ConversationTurnFile> Files { get; set; }
   [JsonPropertyName("encryptedReasoningContent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public IList<string> EncryptedReasoningContent { get; set; }
+  [JsonPropertyName("reasoningSummaries"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public IList<string> ReasoningSummaries { get; set; }
   [JsonPropertyName("timestamp"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public DateTime? Timestamp { get; set; }
 }

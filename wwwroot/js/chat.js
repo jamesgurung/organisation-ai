@@ -70,6 +70,11 @@ async function chat(prompt, files) {
     currentResponseText = '';
     currentResponseElement = null;
     searchStatusElement = null;
+    reasoningStatusElement = null;
+    reasoningSummaryText = '';
+    reasoningSummaryIndex = null;
+    reasoningSummaryNeedsSeparator = false;
+    reasoningCompleted = false;
     
     const formData = new FormData();
     formData.append('prompt', prompt);
@@ -103,6 +108,12 @@ function addMessageToUI(turn) {
 
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${turn.role}-message`;
+
+  if (turn.role === 'assistant' && turn.reasoningSummaries?.length) {
+    turn.reasoningSummaries
+      .filter(summary => summary.trim())
+      .forEach(summary => messageDiv.appendChild(createReasoningStatus(summary, true)));
+  }
 
   if ((turn.images?.length ?? 0) > 0 || (turn.files?.length ?? 0) > 0) {
     const filesContainer = document.createElement('div');

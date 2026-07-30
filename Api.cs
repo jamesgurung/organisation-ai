@@ -150,7 +150,13 @@ public static class Api
         EndUserId = id,
         Instructions = conversation.Preset.Instructions,
         Temperature = conversation.Preset.Temperature is null ? null : Convert.ToSingle(conversation.Preset.Temperature, CultureInfo.InvariantCulture),
-        ReasoningOptions = new() { ReasoningEffortLevel = conversation.Preset.ReasoningEffort },
+        ReasoningOptions = new()
+        {
+          ReasoningEffortLevel = conversation.Preset.ReasoningEffort,
+          ReasoningSummaryVerbosity = conversation.Preset.ReasoningEffort is "none" or "minimal"
+            ? null
+            : ResponseReasoningSummaryVerbosity.Auto
+        },
         StoredOutputEnabled = false,
         StreamingEnabled = true
       };
@@ -215,6 +221,10 @@ public static class Api
           {
             case StreamingResponseOutputTextDeltaUpdate text:
               await StreamText(text.Delta);
+              break;
+            case StreamingResponseReasoningSummaryTextDeltaUpdate summary:
+              var summaryDelta = Convert.ToBase64String(Encoding.UTF8.GetBytes(summary.Delta));
+              await StreamText($":::[reasoning_summary={summary.SummaryIndex};{summaryDelta}]:::");
               break;
             case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
               if (conversation.Preset.ReasoningEffort is "none" or "minimal") break;
@@ -283,17 +293,39 @@ public static class Api
           {
             await StreamText($":::[image={image.Type};{image.Content}]:::");
           }
-          var encryptedReasoningContent = response.OutputItems
-            .OfType<ReasoningResponseItem>()
+          var reasoningItems = response.OutputItems.OfType<ReasoningResponseItem>().ToList();
+          var encryptedReasoningContent = reasoningItems
             .Select(o => o.EncryptedContent)
             .Where(o => !string.IsNullOrWhiteSpace(o))
             .ToList();
+          var reasoningSummaries = new List<string>();
+          var consecutiveReasoningSummaries = new List<string>();
+          foreach (var item in response.OutputItems)
+          {
+            if (item is ReasoningResponseItem reasoningItem)
+            {
+              var summary = string.Join("\n\n", reasoningItem.SummaryParts
+                .OfType<ReasoningSummaryTextPart>()
+                .Select(o => o.Text)
+                .Where(o => !string.IsNullOrWhiteSpace(o)));
+              if (!string.IsNullOrWhiteSpace(summary))
+                consecutiveReasoningSummaries.Add(summary);
+            }
+            else if (consecutiveReasoningSummaries.Count > 0)
+            {
+              reasoningSummaries.Add(string.Join("\n\n", consecutiveReasoningSummaries));
+              consecutiveReasoningSummaries.Clear();
+            }
+          }
+          if (consecutiveReasoningSummaries.Count > 0)
+            reasoningSummaries.Add(string.Join("\n\n", consecutiveReasoningSummaries));
           conversation.Turns.Add(new()
           {
             Role = "assistant",
             Text = text,
             Images = images.Count > 0 ? images : null,
-            EncryptedReasoningContent = encryptedReasoningContent.Count > 0 ? encryptedReasoningContent : null
+            EncryptedReasoningContent = encryptedReasoningContent.Count > 0 ? encryptedReasoningContent : null,
+            ReasoningSummaries = reasoningSummaries.Count > 0 ? reasoningSummaries : null
           });
           var responseCost = manualImageCost == 0 && images.Count > 0
             ? CalculateImageCost(imageModel, response.Usage, (userTurn.Images?.Count ?? 0) > 0)

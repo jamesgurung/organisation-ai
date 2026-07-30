@@ -4,7 +4,7 @@
   "libraries": [
     {
       "provider": "jsdelivr",
-      "library": "marked@17.0.4",
+      "library": "marked@18.0.7",
       "destination": "wwwroot/lib/marked/",
       "files": [
         "lib/marked.umd.min.js"

@@ -827,6 +827,27 @@ button {
   margin-bottom: 18px;
 }
 
+.reasoning-summary {
+  color: var(--grey);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.reasoning-summary p {
+  font-size: inherit;
+  margin-bottom: 8px;
+}
+
+.reasoning-summary strong,
+.reasoning-summary h1,
+.reasoning-summary h2,
+.reasoning-summary h3,
+.reasoning-summary h4 {
+  font-weight: 600;
+}
+
 .search-in-progress, .search-completed {
   padding: 8px 12px;
   border-radius: 6px;

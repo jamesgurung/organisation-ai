@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
     <ImplicitUsings>enable</ImplicitUsings>
     <AnalysisMode>All</AnalysisMode>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>

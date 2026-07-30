@@ -1,6 +1,11 @@
 ﻿let currentResponseText = '';
 let currentResponseElement = null;
 let searchStatusElement = null;
+let reasoningStatusElement = null;
+let reasoningSummaryText = '';
+let reasoningSummaryIndex = null;
+let reasoningSummaryNeedsSeparator = false;
+let reasoningCompleted = false;
 let textContainer = null;
 const inProgressStatuses = {
   '[web_search_in_progress]': { text: 'Searching the web...', icon: 'search' },
@@ -45,6 +50,7 @@ async function streamResponse(response) {
     }
   }
   if (buffer.length > 0) processChunk(buffer);
+  completeReasoningStatus();
 }
 
 function processChunk(chunk) {
@@ -61,20 +67,67 @@ function processChunk(chunk) {
   const inProgressStatus = inProgressStatuses[chunk];
   const completedText = completedStatusText[chunk];
   if (inProgressStatus) {
-    searchStatusElement = document.createElement('div');
-    searchStatusElement.className = 'search-container';
-    searchStatusElement.innerHTML = `<div class="search-in-progress"><span class="material-symbols-rounded">${inProgressStatus.icon}</span> ${inProgressStatus.text}</div>`;
-    currentResponseElement.appendChild(searchStatusElement);
-  } else if (completedText) {
-    if (searchStatusElement)
-      searchStatusElement.innerHTML = `<div class="search-completed"><span class="material-symbols-rounded">check_circle</span> ${completedText}</div>`;
+    if (chunk === '[reasoning_in_progress]') {
+      if (reasoningStatusElement) {
+        reasoningSummaryNeedsSeparator = reasoningCompleted && reasoningSummaryText.length > 0;
+      } else {
+        reasoningSummaryText = '';
+        reasoningStatusElement = createReasoningStatus();
+        currentResponseElement.appendChild(reasoningStatusElement);
+      }
+      reasoningSummaryIndex = null;
+      reasoningCompleted = false;
+    } else {
+      completeReasoningStatus();
+      searchStatusElement = document.createElement('div');
+      searchStatusElement.className = 'search-container';
+      searchStatusElement.innerHTML = `<div class="search-in-progress"><span class="material-symbols-rounded">${inProgressStatus.icon}</span> ${inProgressStatus.text}</div>`;
+      currentResponseElement.appendChild(searchStatusElement);
+    }
     textContainer = null;
+  } else if (completedText) {
+    if (chunk === '[reasoning_completed]') {
+      reasoningCompleted = true;
+    } else {
+      const statusElement = searchStatusElement?.querySelector('.search-in-progress, .search-completed');
+      if (statusElement) {
+        statusElement.className = 'search-completed';
+        statusElement.innerHTML = `<span class="material-symbols-rounded">check_circle</span> ${completedText}`;
+      }
+    }
+    textContainer = null;
+  } else if (chunk.startsWith('[reasoning_summary=')) {
+    if (!reasoningStatusElement) {
+      reasoningStatusElement = createReasoningStatus();
+      currentResponseElement.appendChild(reasoningStatusElement);
+    }
+    const prefix = '[reasoning_summary=';
+    const separatorIndex = chunk.indexOf(';', prefix.length);
+    const summaryIndex = Number(chunk.substring(prefix.length, separatorIndex));
+    const encodedDelta = chunk.substring(separatorIndex + 1, chunk.length - 1);
+    const bytes = Uint8Array.from(atob(encodedDelta), character => character.charCodeAt(0));
+    if (reasoningSummaryIndex !== null && reasoningSummaryIndex !== summaryIndex)
+      reasoningSummaryNeedsSeparator = reasoningSummaryText.length > 0;
+    if (reasoningSummaryNeedsSeparator) {
+      reasoningSummaryText += '\n\n';
+      reasoningSummaryNeedsSeparator = false;
+    }
+    reasoningSummaryIndex = summaryIndex;
+    reasoningSummaryText += new TextDecoder().decode(bytes);
+    let summaryElement = reasoningStatusElement.querySelector('.reasoning-summary');
+    if (!summaryElement) {
+      summaryElement = document.createElement('div');
+      summaryElement.className = 'reasoning-summary';
+      reasoningStatusElement.appendChild(summaryElement);
+    }
+    summaryElement.innerHTML = markdownToHtml(reasoningSummaryText);
   } else {
     switch (chunk) {
       case '[spend_limit_reached]':
         spendLimitReached = true;
         break;
       case '[flagged]':
+        completeReasoningStatus();
         showStopMessage(currentResponseElement, stopCommands.find(o => o.token === '[FLAG]'));
         break;
       case '[heartbeat]':
@@ -89,16 +142,19 @@ function processChunk(chunk) {
           break;
         }
         if (chunk.startsWith('[image=')) {
+          completeReasoningStatus();
           const separatorIndex = chunk.indexOf(';');
           appendImageToCurrentResponse(chunk.substring(7, separatorIndex), chunk.substring(separatorIndex + 1, chunk.length - 1));
           break;
         }
         if (chunk.startsWith('[error=')) {
+          completeReasoningStatus();
           currentResponseElement.classList.add('error');
           currentResponseElement.textContent = chunk.substring(7, chunk.length - 1) || 'Something went wrong. Please try again later.';
           break;
         }
 
+        completeReasoningStatus();
         if (!textContainer) {
           textContainer = document.createElement('div');
           currentResponseElement.appendChild(textContainer);
@@ -125,4 +181,38 @@ function appendImageToCurrentResponse(type, content) {
   }
 
   filesContainer.appendChild(createImageFileElement(type, content));
+}
+
+function createReasoningStatus(summary = '', completed = false) {
+  const container = document.createElement('div');
+  container.className = 'search-container';
+
+  const statusElement = document.createElement('div');
+  statusElement.className = completed ? 'search-completed' : 'search-in-progress';
+  statusElement.innerHTML = completed
+    ? '<span class="material-symbols-rounded">check_circle</span> Finished thinking.'
+    : '<span class="material-symbols-rounded">neurology</span> Thinking...';
+  container.appendChild(statusElement);
+
+  if (summary) {
+    const summaryElement = document.createElement('div');
+    summaryElement.className = 'reasoning-summary';
+    summaryElement.innerHTML = markdownToHtml(summary);
+    container.appendChild(summaryElement);
+  }
+
+  return container;
+}
+
+function completeReasoningStatus() {
+  const statusElement = reasoningStatusElement?.querySelector('.search-in-progress, .search-completed');
+  if (!statusElement) return;
+
+  statusElement.className = 'search-completed';
+  statusElement.innerHTML = '<span class="material-symbols-rounded">check_circle</span> Finished thinking.';
+  reasoningStatusElement = null;
+  reasoningSummaryText = '';
+  reasoningSummaryIndex = null;
+  reasoningSummaryNeedsSeparator = false;
+  reasoningCompleted = false;
 }
