@@ -103,11 +103,12 @@ async function chat(prompt, files) {
   }
 }
 
-function addMessageToUI(turn) {
+function addMessageToUI(turn, scrollAfterRender = true) {
   welcomeMessage.style.display = 'none';
 
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${turn.role}-message`;
+  let textContent = null;
 
   if (turn.role === 'assistant' && turn.reasoningSummaries?.length) {
     turn.reasoningSummaries
@@ -156,9 +157,8 @@ function addMessageToUI(turn) {
     } else {
       const textDiv = document.createElement('div');
       textDiv.className = 'message-text';
-      textDiv.innerHTML = markdownToHtml(turn.text);
-      wrapTables(textDiv);
       messageDiv.appendChild(textDiv);
+      textContent = { element: textDiv, markdown: turn.text };
     }
   }
 
@@ -172,6 +172,12 @@ function addMessageToUI(turn) {
   }
 
   chatContentContainer.appendChild(messageDiv);
+  const renderPromise = textContent
+    ? renderMarkdown(textContent.element, textContent.markdown).then(() => wrapTables(textContent.element))
+    : Promise.resolve();
+  renderPromise
+    .then(() => typesetMath(messageDiv.querySelectorAll('[data-math-index]')))
+    .then(() => scrollAfterRender && scrollChatContainer());
   scrollChatContainer();
   return messageDiv;
 }
@@ -195,12 +201,14 @@ function createImageFileElement(type, content) {
 
 function showStopMessage(messageDiv, stopCommand) {
   messageDiv.classList.add(stopCommand.token === '[FLAG]' ? 'error' : 'stop');
-  messageDiv.innerHTML = '';
+  clearRenderedContent(messageDiv);
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   textDiv.innerHTML = markdownToHtml(stopCommand.message);
 
   messageDiv.appendChild(textDiv);
+  if (messageDiv.isConnected)
+    typesetMath(textDiv.querySelectorAll('[data-math-index]')).then(scrollChatContainer);
   scrollChatContainer();
   disableInput();
   userInput.placeholder = 'Please start over.';

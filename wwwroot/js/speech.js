@@ -195,7 +195,7 @@ speakBtn.addEventListener('click', async () => {
   }
 
   welcomeMessage.style.display = 'none';
-  if (currentChatId === null) chatContentContainer.innerHTML = '';
+  if (currentChatId === null) clearRenderedContent(chatContentContainer);
   speakBtn.disabled = true;
   speakBtn.textContent = 'Starting...';
   if (!await startRealtimeSpeech()) {

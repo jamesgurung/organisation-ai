@@ -33,27 +33,27 @@ async function streamResponse(response) {
     while (buffer.length > 0) {
       const tokenStart = buffer.indexOf(':::[');
       if (tokenStart === -1) {
-        processChunk(buffer);
+        await processChunk(buffer);
         buffer = '';
         break;
       }
       if (tokenStart > 0) {
-        processChunk(buffer.substring(0, tokenStart));
+        await processChunk(buffer.substring(0, tokenStart));
         buffer = buffer.substring(tokenStart);
         continue;
       }
 
       const tokenEnd = buffer.indexOf(':::', 3);
       if (tokenEnd === -1) break;
-      processChunk(buffer.substring(3, tokenEnd));
+      await processChunk(buffer.substring(3, tokenEnd));
       buffer = buffer.substring(tokenEnd + 3);
     }
   }
-  if (buffer.length > 0) processChunk(buffer);
+  if (buffer.length > 0) await processChunk(buffer);
   completeReasoningStatus();
 }
 
-function processChunk(chunk) {
+async function processChunk(chunk) {
   if (chunk.length === 0) return;
 
   if (!currentResponseElement) {
@@ -120,7 +120,7 @@ function processChunk(chunk) {
       summaryElement.className = 'reasoning-summary';
       reasoningStatusElement.appendChild(summaryElement);
     }
-    summaryElement.innerHTML = markdownToHtml(reasoningSummaryText);
+    await renderMarkdown(summaryElement, reasoningSummaryText);
   } else {
     switch (chunk) {
       case '[spend_limit_reached]':
@@ -150,6 +150,7 @@ function processChunk(chunk) {
         if (chunk.startsWith('[error=')) {
           completeReasoningStatus();
           currentResponseElement.classList.add('error');
+          clearRenderedContent(currentResponseElement);
           currentResponseElement.textContent = chunk.substring(7, chunk.length - 1) || 'Something went wrong. Please try again later.';
           break;
         }
@@ -164,7 +165,7 @@ function processChunk(chunk) {
 
         const stopCommand = stopCommands.find(({ token }) => currentResponseText.includes(token));
         if (stopCommand) showStopMessage(currentResponseElement, stopCommand);
-        else textContainer.innerHTML = markdownToHtml(currentResponseText);
+        else await renderMarkdown(textContainer, currentResponseText);
         break;
     }
   }

@@ -46,6 +46,29 @@ const sidebarTabs = [
 const headers = { 'X-XSRF-TOKEN': antiforgeryToken };
 
 let isScrolledToBottom = true;
+let mathIndex = 0;
+
+marked.use({
+  extensions: [{
+    name: 'latex',
+    level: 'inline',
+    start(src) {
+      const inlineIndex = src.indexOf('\\(');
+      const displayIndex = src.indexOf('\\[');
+      if (inlineIndex === -1) return displayIndex === -1 ? undefined : displayIndex;
+      return displayIndex === -1 ? inlineIndex : Math.min(inlineIndex, displayIndex);
+    },
+    tokenizer(src) {
+      const match = /^(\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/.exec(src);
+      if (match) return { type: 'latex', raw: match[0], index: mathIndex++ };
+    },
+    renderer(token) {
+      const span = document.createElement('span');
+      span.textContent = token.raw;
+      return `<span class="math-content" data-math-index="${token.index}">${span.innerHTML}</span>`;
+    }
+  }]
+});
 
 chatContainer.addEventListener('scroll', () => {
   isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 30;
@@ -120,7 +143,42 @@ function hideInstructionsPopup() {
 }
 
 function markdownToHtml(markdown) {
+  mathIndex = 0;
   return marked.parse(markdown).replace(/<a /g, '<a target="_blank" rel="noreferrer" ');
+}
+
+async function typesetMath(elements) {
+  const mathElements = Array.from(elements).filter(math => math.dataset.mathTypeset !== 'true');
+  if (mathElements.length === 0 || typeof MathJax.typesetPromise !== 'function') return;
+  mathElements.forEach(math => { math.dataset.mathTypeset = 'true'; });
+
+  try {
+    await MathJax.typesetPromise(mathElements);
+  } catch (error) {
+    console.error('MathJax typesetting failed.', error);
+  }
+}
+
+async function renderMarkdown(element, markdown) {
+  const renderedMath = new Map(Array.from(element.querySelectorAll('[data-math-index]'), math =>
+    [math.dataset.mathIndex, math]));
+  const template = document.createElement('template');
+  template.innerHTML = markdownToHtml(markdown);
+  const newMath = [];
+
+  template.content.querySelectorAll('[data-math-index]').forEach(math => {
+    const rendered = renderedMath.get(math.dataset.mathIndex);
+    if (rendered) math.replaceWith(rendered);
+    else newMath.push(math);
+  });
+
+  element.replaceChildren(template.content);
+  await typesetMath(newMath);
+}
+
+function clearRenderedContent(element) {
+  if (element.hasChildNodes()) MathJax.typesetClear?.([element]);
+  element.replaceChildren();
 }
 
 function wrapTables(el) {
@@ -148,7 +206,7 @@ function init() {
   reviewTab.addEventListener('click', () => switchTab('review'));
   instructionsIcon.addEventListener('click', toggleInstructionsPopup);
   instructionsCloseBtn.addEventListener('click', hideInstructionsPopup);
-  introTextElement.innerHTML = markdownToHtml(introText);
+  renderMarkdown(introTextElement, introText);
   reviewTab.style.display = reviewItems !== null ? 'block' : 'none';
 
   if (!showPresetDetails) {

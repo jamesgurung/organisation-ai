@@ -120,6 +120,30 @@
 <button id="mobile-sidebar-toggle"><span class="material-symbols-rounded">menu</span></button>
 
 @section Scripts {
+  <script>
+    window.MathJax = {
+      output: {
+        displayOverflow: 'scroll',
+        font: 'mathjax-newcm',
+        fontPath: `${location.origin}/lib/mathjax-newcm-font`
+      },
+      options: {
+        worker: {
+          path: `${location.origin}/lib/mathjax/sre`,
+          maps: `${location.origin}/lib/mathjax/sre/mathmaps`,
+          worker: 'speech-worker.js'
+        }
+      },
+      startup: {
+        typeset: false
+      },
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']]
+      }
+    };
+  </script>
+  <script src="/lib/mathjax/tex-chtml.min.js"></script>
   <script src="/lib/marked/lib/marked.umd.min.js"></script>
   <script>
     const antiforgeryToken = '@(Antiforgery.GetAndStoreTokens(HttpContext).RequestToken)';

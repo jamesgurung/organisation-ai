@@ -34,7 +34,7 @@ function createReviewItem(reviewEntity) {
 }
 
 async function loadChat(chatId, user, group) {
-  chatContentContainer.innerHTML = '';
+  clearRenderedContent(chatContentContainer);
   welcomeMessage.style.display = 'none';
   document.querySelectorAll('.chat-list-item.active').forEach(chat => chat.classList.remove('active'));
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
@@ -43,7 +43,7 @@ async function loadChat(chatId, user, group) {
   applyPreset(conversation.preset, !!user);
   currentChatId = chatId;
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
-  conversation.turns.forEach(addMessageToUI);
+  conversation.turns.forEach(turn => addMessageToUI(turn, !user));
   if (window.innerWidth <= 768) sidebar.classList.remove('open');
   if (conversation.preset.voice) {
     speakBtn.style.display = 'none';

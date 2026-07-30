@@ -43,7 +43,7 @@ function applyPreset(preset, isReviewing) {
     instructionsDiv.scrollTop = 0;
   }
 
-  chatContentContainer.innerHTML = '';
+  clearRenderedContent(chatContentContainer);
   welcomeMessage.style.display = currentPreset.introduction ? 'none' : 'block';
   document.querySelectorAll('.chat-list-item').forEach(item =>
     item.classList.toggle('active', item.textContent === currentPreset.title && !isReviewing));
@@ -65,8 +65,8 @@ function applyPreset(preset, isReviewing) {
   if (currentPreset.introduction) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant-message';
-    messageDiv.innerHTML = markdownToHtml(`# ${currentPreset.title}\n\n${currentPreset.introduction}`);
     chatContentContainer.appendChild(messageDiv);
+    renderMarkdown(messageDiv, `# ${currentPreset.title}\n\n${currentPreset.introduction}`);
   }
   if (currentPreset.voice) {
     chatForm.style.display = 'none';
@@ -92,7 +92,7 @@ function startNewChat() {
     return;
   }
 
-  chatContentContainer.innerHTML = '';
+  clearRenderedContent(chatContentContainer);
   welcomeMessage.style.display = 'block';
   userInput.value = '';
   sendBtn.disabled = true;
