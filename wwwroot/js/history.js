@@ -44,6 +44,7 @@ async function loadChat(chatId, user, group) {
   currentChatId = chatId;
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
   conversation.turns.forEach(turn => addMessageToUI(turn, !user));
+  if (!user) applyMaxTurnsLimit();
   if (window.innerWidth <= 768) sidebar.classList.remove('open');
   if (conversation.preset.voice) {
     speakBtn.style.display = 'none';

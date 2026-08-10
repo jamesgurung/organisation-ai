@@ -80,6 +80,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
           "instructions": "You are a helpful AI assistant.",
           "model": "gpt-5.6-sol",
           "imageModel": null,
+          "maxTurns": null,
           "temperature": null,
           "reasoningEffort": "none",
           "voice": null,
@@ -113,6 +114,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         * `instructions` - the system instructions to send to the language model along with the user's message
         * `model` - the OpenAI model to use for this preset, as configured below
         * `imageModel` (optional) - when set to a GPT Image model such as `gpt-image-2`, enables Responses API image generation for this preset
+        * `maxTurns` (optional) - a positive integer limiting the number of user turns in a text conversation; omitted, `null`, zero, or negative values allow unlimited turns
         * `temperature` (optional) - the temperature to use, where supported by the model
         * `reasoningEffort` (optional) - the reasoning effort to use, where supported by the model
         * `voice` (optional) - when set, this enables speech-to-speech mode using the specified voice

@@ -98,6 +98,11 @@ public static class Api
           return Results.BadRequest("Cannot continue a conversation that has been flagged.");
         }
       }
+      var maxTurns = conversation.Preset.MaxTurns.GetValueOrDefault();
+      if (string.IsNullOrEmpty(conversation.Preset.Voice) && maxTurns > 0 && conversation.Turns.Count(o => o.Role == "user") >= maxTurns)
+      {
+        return Results.BadRequest("Maximum conversation turns reached.");
+      }
       if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
       {
         model = OpenAIConfig.Instance.Models.Values.First();

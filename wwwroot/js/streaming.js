@@ -1,4 +1,5 @@
 ﻿let currentResponseText = '';
+let currentResponseMarkdown = '';
 let currentResponseElement = null;
 let searchStatusElement = null;
 let reasoningStatusElement = null;
@@ -156,6 +157,7 @@ async function processChunk(chunk) {
         }
 
         completeReasoningStatus();
+        currentResponseMarkdown += chunk;
         if (!textContainer) {
           textContainer = document.createElement('div');
           currentResponseElement.appendChild(textContainer);

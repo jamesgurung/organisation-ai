@@ -79,6 +79,7 @@ public static class BlobService
               Title = preset.Title,
               Category = preset.Category,
               Introduction = preset.Introduction,
+              MaxTurns = preset.MaxTurns,
               Voice = preset.Voice
             })
             .ToList();

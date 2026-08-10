@@ -52,6 +52,8 @@ public class Preset
   public string Model { get; set; }
   [JsonPropertyName("imageModel"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public string ImageModel { get; set; }
+  [JsonPropertyName("maxTurns"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public int? MaxTurns { get; set; }
   [JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public decimal? Temperature { get; set; }
   [JsonPropertyName("reasoningEffort"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

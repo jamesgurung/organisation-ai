@@ -49,6 +49,7 @@ function applyPreset(preset, isReviewing) {
     item.classList.toggle('active', item.textContent === currentPreset.title && !isReviewing));
 
   longChatWarning.style.display = 'none';
+  maxTurnsWarning.style.display = 'none';
   inputContainer.style.display = isReviewing ? 'none' : 'block';
   userElement.style.display = 'none';
   settingsDisplay.style.display = showPresetDetails ? 'block' : 'none';

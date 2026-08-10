@@ -6,6 +6,7 @@ const maxLongImageSide = 2000;
 
 async function handleSubmit(e) {
   e.preventDefault();
+  if (applyMaxTurnsLimit()) return;
   const message = userInput.value.trim().replace(/\r\n/g, '\n');
   userInput.value = message;
   const files = selectedFiles;
@@ -65,9 +66,22 @@ function enableInput() {
   focusInput();
 }
 
+function applyMaxTurnsLimit() {
+  const maxTurns = currentPreset?.maxTurns;
+  if (currentPreset?.voice || !Number.isInteger(maxTurns) || maxTurns <= 0 ||
+    chatContentContainer.querySelectorAll('.user-message').length < maxTurns)
+    return false;
+
+  longChatWarning.style.display = 'none';
+  maxTurnsWarning.style.display = 'block';
+  disableInput();
+  return true;
+}
+
 async function chat(prompt, files) {
   try {
     currentResponseText = '';
+    currentResponseMarkdown = '';
     currentResponseElement = null;
     searchStatusElement = null;
     reasoningStatusElement = null;
@@ -88,12 +102,15 @@ async function chat(prompt, files) {
     if (response.ok) {
       await streamResponse(response);
       wrapTables(currentResponseElement);
-      if (chatContentContainer.querySelectorAll('.user-message').length >= 6) {
+      const classList = currentResponseElement.classList;
+      if (currentResponseMarkdown && !classList.contains('stop') && !classList.contains('error'))
+        addResponseCopyButton(currentResponseElement, currentResponseMarkdown);
+      const maxTurnsReached = applyMaxTurnsLimit();
+      if (!maxTurnsReached && chatContentContainer.querySelectorAll('.user-message').length >= 6) {
         longChatWarning.style.display = 'block';
         scrollChatContainer();
       }
-      const classList = currentResponseElement.classList;
-      if (!classList.contains('stop') && !classList.contains('error')) enableInput();
+      if (!maxTurnsReached && !classList.contains('stop') && !classList.contains('error')) enableInput();
     } else {
       addErrorMessageToUI();
     }
@@ -109,6 +126,7 @@ function addMessageToUI(turn, scrollAfterRender = true) {
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${turn.role}-message`;
   let textContent = null;
+  let copyMarkdown = '';
 
   if (turn.role === 'assistant' && turn.reasoningSummaries?.length) {
     turn.reasoningSummaries
@@ -159,6 +177,7 @@ function addMessageToUI(turn, scrollAfterRender = true) {
       textDiv.className = 'message-text';
       messageDiv.appendChild(textDiv);
       textContent = { element: textDiv, markdown: turn.text };
+      if (turn.role === 'assistant') copyMarkdown = turn.text;
     }
   }
 
@@ -171,6 +190,8 @@ function addMessageToUI(turn, scrollAfterRender = true) {
     messageDiv.appendChild(timestampDiv);
   }
 
+  if (copyMarkdown) addResponseCopyButton(messageDiv, copyMarkdown);
+
   chatContentContainer.appendChild(messageDiv);
   const renderPromise = textContent
     ? renderMarkdown(textContent.element, textContent.markdown).then(() => wrapTables(textContent.element))
@@ -181,6 +202,53 @@ function addMessageToUI(turn, scrollAfterRender = true) {
   scrollChatContainer();
   return messageDiv;
 }
+
+function addResponseCopyButton(messageDiv, markdown) {
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'response-copy-button';
+  copyButton.title = 'Copy response';
+  copyButton.setAttribute('aria-label', 'Copy response');
+
+  const icon = document.createElement('span');
+  icon.className = 'material-symbols-rounded';
+  icon.textContent = 'content_copy';
+  icon.setAttribute('aria-hidden', 'true');
+  copyButton.appendChild(icon);
+
+  let resetTimeout;
+  copyButton.addEventListener('click', async e => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(markdown);
+    } catch {
+      return;
+    }
+
+    clearTimeout(resetTimeout);
+    icon.textContent = 'check';
+    copyButton.classList.add('copy-success');
+    copyButton.title = 'Copied';
+    copyButton.setAttribute('aria-label', 'Copied');
+    resetTimeout = setTimeout(() => {
+      icon.textContent = 'content_copy';
+      copyButton.classList.remove('copy-success');
+      copyButton.title = 'Copy response';
+      copyButton.setAttribute('aria-label', 'Copy response');
+    }, 1500);
+  });
+
+  messageDiv.appendChild(copyButton);
+}
+
+document.addEventListener('pointerup', e => {
+  if (e.pointerType === 'mouse') return;
+  const message = e.target.closest('.assistant-message');
+  document.querySelectorAll('.assistant-message.copy-visible').forEach(element => {
+    if (element !== message) element.classList.remove('copy-visible');
+  });
+  if (message?.querySelector('.response-copy-button')) message.classList.add('copy-visible');
+});
 
 function createImageFileElement(type, content) {
   const fileElement = document.createElement('div');

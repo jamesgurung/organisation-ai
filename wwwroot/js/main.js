@@ -36,6 +36,7 @@ const inputContainer = document.getElementById('input-container');
 const userElement = document.getElementById('user');
 const reviewBadge = document.getElementById('review-badge');
 const longChatWarning = document.getElementById('long-chat-warning');
+const maxTurnsWarning = document.getElementById('max-turns-warning');
 const smallScreenBreakpoint = 1200;
 const sidebarTabs = [
   { name: 'presets', button: presetsTab, content: presetsContainer },
