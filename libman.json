@@ -3,7 +3,6 @@
   "defaultProvider": "jsdelivr",
   "libraries": [
     {
-      "provider": "jsdelivr",
       "library": "marked@18.0.9",
       "destination": "wwwroot/lib/marked/",
       "files": [
@@ -11,7 +10,6 @@
       ]
     },
     {
-      "provider": "jsdelivr",
       "library": "chart.js@4.5.1",
       "destination": "wwwroot/lib/chart.js/",
       "files": [

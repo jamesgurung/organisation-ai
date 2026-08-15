@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using System.Net;
 using System.Security.Claims;
@@ -42,7 +43,9 @@ public static class AuthConfig
               return;
 
             if (UserExists(context.Principal.Identity.Name))
+            {
               context.ShouldRenew = true;
+            }
             else
             {
               context.RejectPrincipal();
@@ -53,10 +56,11 @@ public static class AuthConfig
       })
       .AddOpenIdConnect("Microsoft", o =>
       {
-        o.Authority = $"https://login.microsoftonline.com/{builder.Configuration["Azure:TenantId"]}/v2.0/";
-        o.ClientId = builder.Configuration["Azure:ClientId"];
-        o.ClientSecret = builder.Configuration["Azure:ClientSecret"];
+        o.Authority = $"https://login.microsoftonline.com/{builder.Configuration["MicrosoftTenantId"]}/v2.0/";
+        o.ClientId = builder.Configuration["MicrosoftClientId"];
+        o.ClientSecret = builder.Configuration["MicrosoftClientSecret"];
         o.ResponseType = OpenIdConnectResponseType.Code;
+        o.ResponseMode = OpenIdConnectResponseMode.Query;
         o.MapInboundClaims = false;
         o.Scope.Clear();
         o.Scope.Add("openid");
@@ -86,7 +90,10 @@ public static class AuthConfig
     builder.Services.AddAuthorizationBuilder().SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
   }
 
-  private static bool UserExists(string email) => !string.IsNullOrWhiteSpace(email) && UserGroup.GroupNameByUserEmail.ContainsKey(email);
+  private static bool UserExists(string email)
+  {
+    return !string.IsNullOrWhiteSpace(email) && UserGroup.GroupNameByUserEmail.ContainsKey(email);
+  }
 
   public static void MapAuthPaths(this WebApplication app)
   {

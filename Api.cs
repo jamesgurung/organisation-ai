@@ -585,6 +585,7 @@ public static class Api
     };
     var summaryPrompt = string.IsNullOrEmpty(presetTitle) ? prompt : $"{presetTitle}: {prompt}";
     summaryOptions.InputItems.Add(ResponseItem.CreateUserMessageItem(summaryPrompt));
+    summaryOptions.Patch.Set("$.prompt_cache_options.mode"u8, "explicit");
     var summaryResponse = await summaryClient.CreateResponseAsync(summaryOptions);
     return new SummaryResponse
     {
@@ -621,11 +622,15 @@ public static class Api
     return sources.ToString();
   }
 
-  private static int CountWebSearchCalls(ResponseResult response) =>
-    response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
+  private static int CountWebSearchCalls(ResponseResult response)
+  {
+    return response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
+  }
 
-  private static int CountFileSearchCalls(ResponseResult response) =>
-    response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
+  private static int CountFileSearchCalls(ResponseResult response)
+  {
+    return response.OutputItems.OfType<FileSearchCallResponseItem>().Count();
+  }
 
   private static List<ConversationTurnImage> GetGeneratedImages(ResponseResult response)
   {
@@ -702,18 +707,6 @@ public static class Api
     return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * inputCost / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * cachedInputCost / 1_000_000m) +
            (usage.OutputTokenCount * outputCost / 1_000_000m);
-#endif
-  }
-
-  private static decimal CalculateImageCost(OpenAIModelConfig model, ImageTokenUsage usage)
-  {
-#if DEBUG
-    return 0;
-#else
-    return (usage.InputTokenDetails.TextTokenCount * model.CostPer1MInputTokens / 1_000_000m) +
-           (usage.InputTokenDetails.ImageTokenCount * (model.CostPer1MImageInputTokens ?? model.CostPer1MInputTokens) / 1_000_000m) +
-           (usage.OutputTokenDetails.TextTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
-           (usage.OutputTokenDetails.ImageTokenCount * (model.CostPer1MImageOutputTokens ?? model.CostPer1MOutputTokens) / 1_000_000m);
 #endif
   }
 

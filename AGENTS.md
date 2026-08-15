@@ -10,7 +10,7 @@
 - To avoid interfering with active processes, run validation builds in two separate shell calls using a unique literal path beneath the project's MSBuild-excluded and gitignored `artifacts` directory: first run `dotnet build --artifacts-path 'artifacts/dotnet-build-<unique-token>'` with a timeout of at least 120 seconds, then run `dotnet build --target:Clean --no-restore --artifacts-path '<same path>'` to remove the generated files. Let `dotnet` create the directory; do not use shell variables, pre-create it, use `Remove-Item -Recurse`, or combine the build and cleanup. Empty ignored directories may remain.
 - Such builds are only necessary after a significant C# code change, not after every minor edit.
 - Do not introduce any test projects.
-- Do not access files named `appsettings.json`, `secrets.json`, or `local.settings.json` under any circumstances.
+- Do not access `secrets.json` or inspect the values of live app settings under any circumstances.
 
 ## Editing
 

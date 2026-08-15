@@ -1,3 +1,4 @@
+using Azure.Identity;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -6,23 +7,45 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var appConfigEndpoint = builder.Configuration["AppConfigurationEndpoint"];
+var appConfigConnectionString = builder.Configuration.GetConnectionString("AppConfiguration");
+if (appConfigEndpoint is not null || appConfigConnectionString is not null)
+{
+  builder.Configuration.AddAzureAppConfiguration(options =>
+  {
+    if (appConfigEndpoint is not null)
+    {
+      options.Connect(new Uri(appConfigEndpoint), new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned));
+    }
+    else
+    {
+      options.Connect(appConfigConnectionString);
+    }
+    options
+      .Select("Shared:*")
+      .Select("OrgAI:*")
+      .TrimKeyPrefix("Shared:")
+      .TrimKeyPrefix("OrgAI:");
+  });
+}
+
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
-  o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+  o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
   o.KnownIPNetworks.Clear();
   o.KnownProxies.Clear();
 });
 
-builder.Services.AddDataProtection().PersistKeysToAzureBlobStorage(new Uri(builder.Configuration["Azure:DataProtectionBlobUri"]));
+builder.Services.AddDataProtection().PersistKeysToAzureBlobStorage(new Uri(builder.Configuration["DataProtectionBlobUri"]));
 
-var storageAccountName = builder.Configuration["Azure:StorageAccountName"];
-var storageAccountKey = builder.Configuration["Azure:StorageAccountKey"];
+var storageAccountName = builder.Configuration["StorageAccountName"];
+var storageAccountKey = builder.Configuration["StorageAccountKey"];
 var connectionString = $"DefaultEndpointsProtocol=https;AccountName={storageAccountName};AccountKey={storageAccountKey};EndpointSuffix=core.windows.net";
 TableService.Configure(connectionString);
 BlobService.Configure(connectionString);
 
-Organisation.Instance = builder.Configuration.GetSection("Organisation").Get<Organisation>();
-OpenAIConfig.Instance = builder.Configuration.GetSection("OpenAI").Get<OpenAIConfig>();
+Organisation.Instance = builder.Configuration.Get<Organisation>();
+OpenAIConfig.Instance = builder.Configuration.Get<OpenAIConfig>();
 
 Api.Configure();
 await BlobService.LoadConfigAsync();
