@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const renderWeeklyChart = data => {
     const weeks = [...new Set(data.map(item => item.week))].sort();
     const groups = [...new Set(data.map(item => item.group))];
+    const weeklyChartCanvas = document.getElementById('weeklySpendChart');
 
     const datasets = groups.map(group => {
       const groupData = weeks.map(week => data
@@ -117,21 +118,23 @@ document.addEventListener('DOMContentLoaded', () => {
         label: group,
         data: groupData,
         backgroundColor: groupColors[group],
-        borderWidth: 2,
-        borderColor: 'white'
+        borderWidth: 0,
+        categoryPercentage: 1,
+        barPercentage: 1,
+        inflateAmount: 1
       };
     });
 
     if (weeklyChart)
       weeklyChart.destroy();
 
-    const weeklyChartCtx = document.getElementById('weeklySpendChart').getContext('2d');
+    const weeklyChartCtx = weeklyChartCanvas.getContext('2d');
     weeklyChart = new Chart(weeklyChartCtx, {
       type: 'bar',
       data: {
         labels: weeks.map(w => {
           const date = new Date(w);
-          return `Week of ${date.toLocaleDateString()}`;
+          return date.toLocaleDateString();
         }),
         datasets
       },

@@ -37,6 +37,7 @@ async function startRealtimeSpeech() {
 }
 
 function stopRealtimeSpeech() {
+  removeTypingIndicator();
   if (micStream) {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
@@ -100,6 +101,11 @@ async function handleRealtimeSpeechEvent(data) {
         showAssistantTranscript();
       }
       break;
+    case 'output_audio_buffer.started':
+      assistantHasResponded = true;
+      showTypingIndicator();
+      document.querySelector('#typing-indicator .activity-label').textContent = 'Speaking';
+      break;
     case 'output_audio_buffer.stopped':
       assistantHasResponded = true;
       removeTypingIndicator();
@@ -153,6 +159,7 @@ async function recordRealtimeTurn(usage) {
   const result = await response.json();
   if (currentChatId === null) {
     currentChatId = result.id;
+    replaceSelectionQuery('conversation', currentChatId);
     const conversationEntity = { id: currentChatId, title: result.title };
     history.unshift(conversationEntity);
     const historyItem = createHistoryItem(conversationEntity);

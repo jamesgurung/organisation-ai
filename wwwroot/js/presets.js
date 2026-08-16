@@ -22,9 +22,13 @@ function displayPresets() {
   });
 }
 
-function applyPreset(preset, isReviewing) {
+function applyPreset(preset, isReviewing, updateUrl = true) {
+  cancelHistoryLoad();
+  resetStreamingState();
   currentChatId = null;
   currentPreset = preset;
+  if (!isReviewing && updateUrl)
+    replaceSelectionQuery(preset.id === 'default' ? null : 'template', preset.id);
   stopRealtimeSpeech();
 
   if (showPresetDetails) {
@@ -87,12 +91,15 @@ function applyPreset(preset, isReviewing) {
 }
 
 function startNewChat() {
+  cancelHistoryLoad();
+  resetStreamingState();
   const defaultPreset = presets.find(preset => preset.id === 'default');
   if (defaultPreset) {
     applyPreset(defaultPreset, false);
     return;
   }
 
+  replaceSelectionQuery();
   clearRenderedContent(chatContentContainer);
   welcomeMessage.style.display = 'block';
   userInput.value = '';

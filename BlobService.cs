@@ -1,5 +1,7 @@
 ﻿using Azure;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using System.Text.Json;
 
 namespace OrgAI;
@@ -28,17 +30,79 @@ public static class BlobService
 
   public static async Task<Conversation> GetConversationAsync(string conversationId)
   {
+    return (await GetConversationSnapshotAsync(conversationId)).Conversation;
+  }
+
+  public static async Task<ConversationSnapshot> GetConversationSnapshotAsync(string conversationId)
+  {
     ArgumentNullException.ThrowIfNull(conversationId);
     var blob = _conversationsClient.GetBlobClient(conversationId);
     try
     {
       var response = await blob.DownloadContentAsync();
       var json = response.Value.Content.ToString();
-      return JsonSerializer.Deserialize<Conversation>(json);
+      return new(JsonSerializer.Deserialize<Conversation>(json), response.Value.Details.ETag, response.Value.Content);
     }
     catch (RequestFailedException ex) when (ex.Status == 404)
     {
       throw new InvalidOperationException("Conversation not found", ex);
+    }
+  }
+
+  public static async Task UpdateConversationAsync(string conversationId, Conversation conversation, ConversationSnapshot expectedSnapshot, Func<Task> updateMetadataAsync)
+  {
+    ArgumentNullException.ThrowIfNull(conversationId);
+    ArgumentNullException.ThrowIfNull(conversation);
+    ArgumentNullException.ThrowIfNull(expectedSnapshot);
+    ArgumentNullException.ThrowIfNull(updateMetadataAsync);
+    var contents = new BinaryData(JsonSerializer.Serialize(conversation));
+    var blob = _conversationsClient.GetBlobClient(conversationId);
+    var lease = blob.GetBlobLeaseClient();
+    var leaseAcquired = false;
+    try
+    {
+      await lease.AcquireAsync(TimeSpan.FromSeconds(60), cancellationToken: CancellationToken.None);
+      leaseAcquired = true;
+      var properties = await blob.GetPropertiesAsync(new BlobRequestConditions { LeaseId = lease.LeaseId }, CancellationToken.None);
+      if (properties.Value.ETag != expectedSnapshot.ETag)
+        throw new RequestFailedException(412, "The conversation was updated elsewhere.");
+
+      var upload = await blob.UploadAsync(contents, new BlobUploadOptions
+      {
+        Conditions = new BlobRequestConditions { IfMatch = expectedSnapshot.ETag, LeaseId = lease.LeaseId }
+      }, CancellationToken.None);
+      try
+      {
+        await updateMetadataAsync();
+      }
+      catch (Exception metadataException)
+      {
+        try
+        {
+          await blob.UploadAsync(expectedSnapshot.Content, new BlobUploadOptions
+          {
+            Conditions = new BlobRequestConditions { IfMatch = upload.Value.ETag, LeaseId = lease.LeaseId }
+          }, CancellationToken.None);
+        }
+        catch (Exception rollbackException)
+        {
+          throw new AggregateException("Failed to update conversation metadata and restore the previous conversation.", metadataException, rollbackException);
+        }
+        throw;
+      }
+    }
+    finally
+    {
+      if (leaseAcquired)
+      {
+        try
+        {
+          await lease.ReleaseAsync(cancellationToken: CancellationToken.None);
+        }
+        catch (RequestFailedException ex) when (ex.Status is 404 or 409 or 412)
+        {
+        }
+      }
     }
   }
 
@@ -116,3 +180,5 @@ public static class BlobService
     await blob.UploadAsync(new BinaryData(csvContent), true);
   }
 }
+
+public record ConversationSnapshot(Conversation Conversation, ETag ETag, BinaryData Content);

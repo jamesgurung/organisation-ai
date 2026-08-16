@@ -6,11 +6,13 @@ const maxLongImageSide = 2000;
 
 async function handleSubmit(e) {
   e.preventDefault();
+  if (activeHistoryController) return;
   if (applyMaxTurnsLimit()) return;
   const message = userInput.value.trim().replace(/\r\n/g, '\n');
   userInput.value = message;
   const files = selectedFiles;
   if (message.length === 0) return;
+  const submitGeneration = streamingGeneration;
 
   const userTurn = { role: 'user', text: message, timestamp: new Date().toISOString() };
 
@@ -22,8 +24,14 @@ async function handleSubmit(e) {
       }));
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
     const otherFiles = files.filter(file => !file.type.startsWith('image/'));
-    if (imageFiles.length > 0) userTurn.images = await processFilesByType(imageFiles, true);
-    if (otherFiles.length > 0) userTurn.files = await processFilesByType(otherFiles, false);
+    if (imageFiles.length > 0) {
+      userTurn.images = await processFilesByType(imageFiles, true);
+      if (submitGeneration !== streamingGeneration) return;
+    }
+    if (otherFiles.length > 0) {
+      userTurn.files = await processFilesByType(otherFiles, false);
+      if (submitGeneration !== streamingGeneration) return;
+    }
   }
   if (currentChatId !== null) moveCurrentChatToTop();
   addMessageToUI(userTurn);
@@ -32,6 +40,7 @@ async function handleSubmit(e) {
   sendBtn.disabled = true;
   filePreview.innerHTML = '';
   selectedFiles = [];
+  resetStreamingState();
   disableInput();
   showTypingIndicator();
   await chat(message, files);
@@ -79,32 +88,26 @@ function applyMaxTurnsLimit() {
 }
 
 async function chat(prompt, files) {
+  const controller = new AbortController();
+  const generation = streamingGeneration;
   try {
-    currentResponseText = '';
-    currentResponseMarkdown = '';
-    currentResponseElement = null;
-    searchStatusElement = null;
-    reasoningStatusElement = null;
-    reasoningSummaryText = '';
-    reasoningSummaryIndex = null;
-    reasoningSummaryNeedsSeparator = false;
-    reasoningCompleted = false;
-    
+    currentStreamController = controller;
+
     const formData = new FormData();
     formData.append('prompt', prompt);
     if (currentChatId === null) formData.append('presetId', currentPreset.id);
     else formData.append('id', currentChatId);
     if (files) files.forEach(file => { formData.append('files', file); });
 
-    const response = await fetch('/api/chat', { method: 'POST', headers, body: formData });
-    removeTypingIndicator();
+    const response = await fetch('/api/chat', { method: 'POST', headers, body: formData, signal: controller.signal });
     
     if (response.ok) {
-      await streamResponse(response);
+      await streamResponse(response, generation);
+      if (currentStreamController !== controller) return;
       wrapTables(currentResponseElement);
       const classList = currentResponseElement.classList;
       if (currentResponseMarkdown && !classList.contains('stop') && !classList.contains('error'))
-        addResponseCopyButton(currentResponseElement, currentResponseMarkdown);
+        addResponseCopyButton(currentResponseElement, currentResponseMarkdown, getCurrentResponseActivities());
       const maxTurnsReached = applyMaxTurnsLimit();
       if (!maxTurnsReached && chatContentContainer.querySelectorAll('.user-message').length >= 6) {
         longChatWarning.style.display = 'block';
@@ -112,11 +115,18 @@ async function chat(prompt, files) {
       }
       if (!maxTurnsReached && !classList.contains('stop') && !classList.contains('error')) enableInput();
     } else {
+      removeTypingIndicator();
+      clearActivityTimers(true);
       addErrorMessageToUI();
     }
-  } catch {
+  } catch (error) {
+    if (currentStreamController !== controller) return;
     removeTypingIndicator();
+    clearActivityTimers(true);
+    if (error.name === 'AbortError') return;
     addErrorMessageToUI();
+  } finally {
+    if (currentStreamController === controller) currentStreamController = null;
   }
 }
 
@@ -127,12 +137,10 @@ function addMessageToUI(turn, scrollAfterRender = true) {
   messageDiv.className = `message ${turn.role}-message`;
   let textContent = null;
   let copyMarkdown = '';
+  let activityRenderPromise = Promise.resolve();
 
-  if (turn.role === 'assistant' && turn.reasoningSummaries?.length) {
-    turn.reasoningSummaries
-      .filter(summary => summary.trim())
-      .forEach(summary => messageDiv.appendChild(createReasoningStatus(summary, true)));
-  }
+  if (turn.role === 'assistant' && turn.activities?.length)
+    activityRenderPromise = appendStoredActivities(messageDiv, turn.activities);
 
   if ((turn.images?.length ?? 0) > 0 || (turn.files?.length ?? 0) > 0) {
     const filesContainer = document.createElement('div');
@@ -190,20 +198,24 @@ function addMessageToUI(turn, scrollAfterRender = true) {
     messageDiv.appendChild(timestampDiv);
   }
 
-  if (copyMarkdown) addResponseCopyButton(messageDiv, copyMarkdown);
+  if (copyMarkdown) addResponseCopyButton(messageDiv, copyMarkdown, turn.activities);
 
   chatContentContainer.appendChild(messageDiv);
-  const renderPromise = textContent
-    ? renderMarkdown(textContent.element, textContent.markdown).then(() => wrapTables(textContent.element))
-    : Promise.resolve();
+  const renderPromise = Promise.all([
+    activityRenderPromise,
+    textContent
+      ? renderMarkdown(textContent.element, textContent.markdown)
+      : Promise.resolve()
+  ]);
   renderPromise
+    .then(() => wrapTables(messageDiv))
     .then(() => typesetMath(messageDiv.querySelectorAll('[data-math-index]')))
     .then(() => scrollAfterRender && scrollChatContainer());
   scrollChatContainer();
   return messageDiv;
 }
 
-function addResponseCopyButton(messageDiv, markdown) {
+function addResponseCopyButton(messageDiv, markdown, activities = []) {
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.className = 'response-copy-button';
@@ -220,7 +232,22 @@ function addResponseCopyButton(messageDiv, markdown) {
   copyButton.addEventListener('click', async e => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(markdown);
+      const escapeMarkdown = value => String(value ?? '')
+        .replace(/\s*\r?\n\s*/g, ' ')
+        .replace(/([\\`*_{}\[\]()<>#+\-.!|])/g, '\\$1');
+      const sourceKeys = new Set();
+      const sources = [];
+      (activities ?? []).flatMap(activity => activity.sources ?? []).forEach(source => {
+        const safeUri = getSafeSourceUri(source.uri);
+        const key = safeUri ? `uri:${safeUri}` : `file:${(source.filename || source.title || source.uri || '').toLowerCase()}`;
+        if (!key || sourceKeys.has(key)) return;
+        sourceKeys.add(key);
+        sources.push(safeUri
+          ? `* [${escapeMarkdown(source.title || safeUri)}](<${safeUri.replace(/</g, '%3C').replace(/>/g, '%3E')}>)`
+          : `* ${source.title && source.title !== source.filename ? `${escapeMarkdown(source.title)}${source.filename ? ' — ' : ''}` : ''}${escapeMarkdown(source.filename || source.uri)}`);
+      });
+      const copyMarkdown = sources.length > 0 ? `${markdown}\n\n### Sources\n${sources.join('\n')}` : markdown;
+      await navigator.clipboard.writeText(copyMarkdown);
     } catch {
       return;
     }
@@ -269,7 +296,10 @@ function createImageFileElement(type, content) {
 
 function showStopMessage(messageDiv, stopCommand) {
   messageDiv.classList.add(stopCommand.token === '[FLAG]' ? 'error' : 'stop');
+  const activityList = messageDiv.querySelector(':scope > .activity-list');
+  activityList?.remove();
   clearRenderedContent(messageDiv);
+  if (activityList) messageDiv.appendChild(activityList);
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   textDiv.innerHTML = markdownToHtml(stopCommand.message);
@@ -283,6 +313,7 @@ function showStopMessage(messageDiv, stopCommand) {
 }
 
 function addErrorMessageToUI() {
+  clearActivityTimers(true);
   welcomeMessage.style.display = 'none';
 
   const messageDiv = document.createElement('div');
@@ -390,10 +421,25 @@ function showTypingIndicator(isUser) {
   removeTypingIndicator();
   const indicator = document.createElement('div');
   indicator.id = 'typing-indicator';
-  if (isUser) indicator.className = 'user';
-  for (let i = 0; i < 3; i++) {
-    const dot = document.createElement('span');
-    indicator.appendChild(dot);
+  if (isUser) {
+    indicator.className = 'user';
+    for (let i = 0; i < 3; i++) indicator.appendChild(document.createElement('span'));
+  } else {
+    indicator.className = 'assistant';
+    const label = document.createElement('span');
+    label.className = 'activity-label';
+    label.textContent = 'Waiting';
+    const timer = document.createElement('span');
+    timer.className = 'activity-timer';
+    const chevron = document.createElement('span');
+    chevron.className = 'material-symbols-rounded activity-chevron activity-chevron-placeholder';
+    chevron.textContent = 'expand_more';
+    chevron.setAttribute('aria-hidden', 'true');
+    indicator.appendChild(createDriveLoader());
+    indicator.appendChild(label);
+    indicator.appendChild(timer);
+    indicator.appendChild(chevron);
+    indicator.timerId = startActivityTimer(timer);
   }
   chatContentContainer.appendChild(indicator);
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -401,6 +447,8 @@ function showTypingIndicator(isUser) {
 
 function removeTypingIndicator(isUser) {
   const indicator = document.getElementById('typing-indicator');
-  if (indicator && (!isUser || indicator.className === 'user'))
+  if (indicator && (!isUser || indicator.className === 'user')) {
+    stopActivityTimer(indicator.timerId);
     indicator.remove();
+  }
 }

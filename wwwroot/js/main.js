@@ -48,6 +48,9 @@ const headers = { 'X-XSRF-TOKEN': antiforgeryToken };
 
 let isScrolledToBottom = true;
 let mathIndex = 0;
+const renderedPlainText = new WeakMap();
+const streamingTextAnimations = new WeakMap();
+const streamingAnimationDuration = 600;
 
 marked.use({
   extensions: [{
@@ -99,6 +102,46 @@ function switchTab(tab) {
     button.classList.toggle('active', isSelected);
     content.style.display = isSelected ? 'block' : 'none';
   });
+}
+
+function replaceSelectionQuery(type, id) {
+  const url = new URL(location.href);
+  url.searchParams.delete('template');
+  url.searchParams.delete('conversation');
+  if (type) url.searchParams.set(type, id);
+  url.hash = '';
+  const path = `${url.pathname}${url.search}`;
+  if (`${location.pathname}${location.search}${location.hash}` === path) return;
+  window.history.replaceState(window.history.state, '', path);
+}
+
+function parseSelectionQuery() {
+  const parameters = new URLSearchParams(location.search);
+  const templateId = parameters.get('template');
+  const conversationId = parameters.get('conversation');
+  if (templateId !== null && conversationId === null) return { type: 'template', id: templateId };
+  if (conversationId !== null && templateId === null) return { type: 'conversation', id: conversationId };
+  return null;
+}
+
+function navigateFromQuery() {
+  const selection = parseSelectionQuery();
+  if (selection?.type === 'template') {
+    const preset = presets.find(item => item.id === selection.id);
+    if (preset) {
+      switchTab('presets');
+      applyPreset(preset, false);
+      return;
+    }
+  } else if (selection?.type === 'conversation') {
+    const conversation = history.find(item => item.id === selection.id);
+    if (conversation) {
+      switchTab('history');
+      loadChat(conversation.id, false);
+      return;
+    }
+  }
+  startNewChat();
 }
 
 function createListItem(text, onActivate) {
@@ -160,12 +203,72 @@ async function typesetMath(elements) {
   }
 }
 
-async function renderMarkdown(element, markdown) {
+async function renderMarkdown(element, markdown, streaming = false) {
   const renderedMath = new Map(Array.from(element.querySelectorAll('[data-math-index]'), math =>
     [math.dataset.mathIndex, math]));
   const template = document.createElement('template');
   template.innerHTML = markdownToHtml(markdown);
+  const previousText = renderedPlainText.get(element) ?? '';
+  const nextText = (template.content.textContent ?? '').trimEnd();
   const newMath = [];
+
+  if (streaming && nextText.startsWith(previousText)) {
+    const now = performance.now();
+    const animations = (streamingTextAnimations.get(element) ?? [])
+      .filter(animation => now - animation.startedAt < streamingAnimationDuration + animation.delay);
+    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let offset = 0;
+    let animationIndex = 0;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const start = offset;
+      offset += node.textContent.length;
+      if (node.parentElement?.closest('pre, code, .math-content, mjx-container, script, style')) continue;
+      textNodes.push({ node, start, end: offset });
+    }
+
+    textNodes.forEach(({ node, start, end }) => {
+      const splitIndex = Math.max(0, previousText.length - start);
+      if (end <= previousText.length) return;
+      Array.from(node.textContent.substring(splitIndex).matchAll(/\S+/g)).forEach(match => {
+        const animationStart = start + splitIndex + match.index;
+        animations.push({
+          start: animationStart,
+          end: animationStart + match[0].length,
+          startedAt: now,
+          delay: Math.min(animationIndex++ * 24, 120)
+        });
+      });
+    });
+
+    textNodes.forEach(({ node, start, end }) => {
+      const nodeAnimations = animations
+        .filter(animation => animation.end > start && animation.start < end)
+        .sort((left, right) => left.start - right.start);
+      if (nodeAnimations.length === 0) return;
+      const fragment = document.createDocumentFragment();
+      let cursor = 0;
+      nodeAnimations.forEach(animation => {
+        const animationStart = Math.max(0, animation.start - start);
+        const animationEnd = Math.min(node.textContent.length, animation.end - start);
+        if (animationStart > cursor)
+          fragment.appendChild(document.createTextNode(node.textContent.substring(cursor, animationStart)));
+        const span = document.createElement('span');
+        span.className = 'streaming-text-fragment';
+        span.style.animationDelay = `${animation.delay - (now - animation.startedAt)}ms`;
+        span.textContent = node.textContent.substring(animationStart, animationEnd);
+        fragment.appendChild(span);
+        cursor = animationEnd;
+      });
+      if (cursor < node.textContent.length)
+        fragment.appendChild(document.createTextNode(node.textContent.substring(cursor)));
+      node.replaceWith(fragment);
+    });
+    streamingTextAnimations.set(element, animations);
+  } else {
+    streamingTextAnimations.delete(element);
+  }
 
   template.content.querySelectorAll('[data-math-index]').forEach(math => {
     const rendered = renderedMath.get(math.dataset.mathIndex);
@@ -174,11 +277,17 @@ async function renderMarkdown(element, markdown) {
   });
 
   element.replaceChildren(template.content);
+  renderedPlainText.set(element, nextText);
   await typesetMath(newMath);
+  if (streaming && (streamingTextAnimations.get(element)?.length ?? 0) > 0 &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    await new Promise(resolve => setTimeout(resolve, 16));
 }
 
 function clearRenderedContent(element) {
   if (element.hasChildNodes()) MathJax.typesetClear?.([element]);
+  renderedPlainText.delete(element);
+  streamingTextAnimations.delete(element);
   element.replaceChildren();
 }
 
@@ -231,6 +340,7 @@ function init() {
   });
 
   document.addEventListener('click', closeSidebarIfOpen);
+  window.addEventListener('popstate', navigateFromQuery);
 
   if (reviewItems !== null) {
     if (reviewItems.length > 0) {
@@ -242,7 +352,7 @@ function init() {
 
   displayPresets();
   refreshHistoryUI();
-  startNewChat();
+  navigateFromQuery();
   focusInput();
 }
 

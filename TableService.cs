@@ -33,6 +33,12 @@ public static class TableService
     await _conversationsClient.UpsertEntityAsync(conversation, TableUpdateMode.Replace);
   }
 
+  public static async Task UpdateConversationAsync(ConversationEntity conversation)
+  {
+    ArgumentNullException.ThrowIfNull(conversation);
+    await _conversationsClient.UpdateEntityAsync(conversation, conversation.ETag, TableUpdateMode.Replace);
+  }
+
   public static async Task<bool> ConversationExistsAsync(string userEmail, string conversationId)
   {
     ArgumentException.ThrowIfNullOrEmpty(userEmail);

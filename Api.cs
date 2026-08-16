@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Azure;
 using OpenAI;
 using OpenAI.Images;
 using OpenAI.Responses;
 using System.ClientModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -64,6 +66,7 @@ public static class Api
       Task<SummaryResponse> summaryTask = null;
       Conversation conversation = null;
       ConversationEntity conversationEntity = null;
+      ConversationSnapshot conversationSnapshot = null;
 
       if (isFirstTurn)
       {
@@ -85,10 +88,11 @@ public static class Api
       else
       {
         var tableTask = TableService.GetConversationAsync(userEmail, id);
-        var blobTask = BlobService.GetConversationAsync(id);
+        var blobTask = BlobService.GetConversationSnapshotAsync(id);
         await Task.WhenAll(tableTask, blobTask);
         conversationEntity = await tableTask;
-        conversation = await blobTask;
+        conversationSnapshot = await blobTask;
+        conversation = conversationSnapshot.Conversation;
         if (conversationEntity.IsDeleted)
         {
           return Results.NotFound("Conversation not found.");
@@ -168,10 +172,12 @@ public static class Api
       chatOptions.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
       if (conversation.Preset.WebSearch)
       {
+        chatOptions.IncludedProperties.Add(IncludedResponseProperty.WebSearchCallActionSources);
         chatOptions.Tools.Add(ResponseTool.CreateWebSearchTool());
       }
       if (!string.IsNullOrWhiteSpace(conversation.Preset.VectorStore))
       {
+        chatOptions.IncludedProperties.Add(IncludedResponseProperty.FileSearchCallResults);
         chatOptions.Tools.Add(ResponseTool.CreateFileSearchTool(vectorStoreIds: [conversation.Preset.VectorStore]));
       }
       if (!string.IsNullOrWhiteSpace(conversation.Preset.ImageModel))
@@ -207,6 +213,8 @@ public static class Api
         await using var responseEnumerator = responseStream.GetAsyncEnumerator(ct);
         var heartbeatTask = heartbeat.WaitForNextTickAsync(ct).AsTask();
         var nextUpdateTask = responseEnumerator.MoveNextAsync().AsTask();
+        var activities = new List<TrackedActivity>();
+        var activitiesById = new Dictionary<string, TrackedActivity>();
 
         while (!ct.IsCancellationRequested)
         {
@@ -225,35 +233,76 @@ public static class Api
           switch (responseEnumerator.Current)
           {
             case StreamingResponseOutputTextDeltaUpdate text:
-              await StreamText(text.Delta);
+              await StreamTextDeltaAsync(text.Delta);
               break;
             case StreamingResponseReasoningSummaryTextDeltaUpdate summary:
-              var summaryDelta = Convert.ToBase64String(Encoding.UTF8.GetBytes(summary.Delta));
-              await StreamText($":::[reasoning_summary={summary.SummaryIndex};{summaryDelta}]:::");
+              var reasoning = await StartActivityAsync(summary.ItemId, "reasoning", summary.OutputIndex);
+              var summaryDelta = reasoning.SummaryIndex is not null && reasoning.SummaryIndex != summary.SummaryIndex && !string.IsNullOrEmpty(reasoning.Activity.Summary)
+                ? $"\n\n{summary.Delta}"
+                : summary.Delta;
+              reasoning.SummaryIndex = summary.SummaryIndex;
+              reasoning.Activity.Summary += summaryDelta;
+              await StreamActivityAsync(new { @event = "summary_delta", id = reasoning.Activity.Id, delta = summaryDelta });
               break;
-            case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem:
+            case StreamingResponseOutputItemAddedUpdate item when item.Item is ReasoningResponseItem reasoningItem:
               if (conversation.Preset.ReasoningEffort is "none" or "minimal") break;
-              await StreamText(":::[reasoning_in_progress]:::");
+              await StartActivityAsync(reasoningItem.Id, "reasoning", item.OutputIndex);
+              break;
+            case StreamingResponseOutputItemAddedUpdate item when item.Item is WebSearchCallResponseItem webSearchItem:
+              await StartActivityAsync(webSearchItem.Id, "web_search", item.OutputIndex);
+              break;
+            case StreamingResponseOutputItemAddedUpdate item when item.Item is FileSearchCallResponseItem fileSearchItem:
+              await StartActivityAsync(fileSearchItem.Id, "file_search", item.OutputIndex);
+              break;
+            case StreamingResponseOutputItemAddedUpdate item when item.Item is ImageGenerationCallResponseItem imageItem:
+              await StartActivityAsync(imageItem.Id, "image_generation", item.OutputIndex);
               break;
             case StreamingResponseOutputItemDoneUpdate item when item.Item is ReasoningResponseItem:
               if (conversation.Preset.ReasoningEffort is "none" or "minimal") break;
-              await StreamText(":::[reasoning_completed]:::");
+              await CompleteActivityAsync(item.Item.Id, "reasoning", item.OutputIndex);
               break;
-            case StreamingResponseFileSearchCallSearchingUpdate:
-              await StreamText(":::[file_search_in_progress]:::");
+            case StreamingResponseOutputItemDoneUpdate item when item.Item is WebSearchCallResponseItem:
+              await CompleteActivityAsync(item.Item.Id, "web_search", item.OutputIndex);
               break;
-            case StreamingResponseFileSearchCallCompletedUpdate:
-              await StreamText(":::[file_search_completed]:::");
+            case StreamingResponseOutputItemDoneUpdate item when item.Item is FileSearchCallResponseItem:
+              await CompleteActivityAsync(item.Item.Id, "file_search", item.OutputIndex);
               break;
-            case StreamingResponseWebSearchCallInProgressUpdate:
-              await StreamText(":::[web_search_in_progress]:::");
+            case StreamingResponseOutputItemDoneUpdate item when item.Item is ImageGenerationCallResponseItem:
+              await CompleteActivityAsync(item.Item.Id, "image_generation", item.OutputIndex);
               break;
-            case StreamingResponseWebSearchCallCompletedUpdate:
-              await StreamText(":::[web_search_completed]:::");
+            case StreamingResponseFileSearchCallSearchingUpdate fileSearch:
+              await StartActivityAsync(fileSearch.ItemId, "file_search", fileSearch.OutputIndex);
+              break;
+            case StreamingResponseFileSearchCallInProgressUpdate fileSearchProgress:
+              await StartActivityAsync(fileSearchProgress.ItemId, "file_search", fileSearchProgress.OutputIndex);
+              break;
+            case StreamingResponseFileSearchCallCompletedUpdate fileSearchCompleted:
+              await CompleteActivityAsync(fileSearchCompleted.ItemId, "file_search", fileSearchCompleted.OutputIndex);
+              break;
+            case StreamingResponseWebSearchCallInProgressUpdate webSearch:
+              await StartActivityAsync(webSearch.ItemId, "web_search", webSearch.OutputIndex);
+              break;
+            case StreamingResponseWebSearchCallSearchingUpdate webSearchSearching:
+              await StartActivityAsync(webSearchSearching.ItemId, "web_search", webSearchSearching.OutputIndex);
+              break;
+            case StreamingResponseWebSearchCallCompletedUpdate webSearchCompleted:
+              await CompleteActivityAsync(webSearchCompleted.ItemId, "web_search", webSearchCompleted.OutputIndex);
+              break;
+            case StreamingResponseImageGenerationCallInProgressUpdate imageProgress:
+              await StartActivityAsync(imageProgress.ItemId, "image_generation", imageProgress.OutputIndex);
+              break;
+            case StreamingResponseImageGenerationCallGeneratingUpdate imageGenerating:
+              await StartActivityAsync(imageGenerating.ItemId, "image_generation", imageGenerating.OutputIndex);
+              break;
+            case StreamingResponseImageGenerationCallPartialImageUpdate partialImage:
+              await StartActivityAsync(partialImage.ItemId, "image_generation", partialImage.OutputIndex);
+              break;
+            case StreamingResponseImageGenerationCallCompletedUpdate imageCompleted:
+              await CompleteActivityAsync(imageCompleted.ItemId, "image_generation", imageCompleted.OutputIndex);
               break;
             case StreamingResponseFailedUpdate failed:
-              await StreamText($":::[error={failed.Response.Error?.Message ?? "The response failed."}]:::");
-              break;
+              await StreamErrorAsync(failed.Response.Error?.Message ?? "The response failed.");
+              return;
             case StreamingResponseCompletedUpdate completion:
               await FinishStreamAsync(completion.Response);
               return;
@@ -267,33 +316,189 @@ public static class Api
           nextUpdateTask = responseEnumerator.MoveNextAsync().AsTask();
         }
 
+        if (!ct.IsCancellationRequested)
+          await StreamErrorAsync("The response ended unexpectedly.");
+
         async Task StreamText(string text)
         {
           await outputStream.WriteAsync(Encoding.UTF8.GetBytes(text), ct);
           await outputStream.FlushAsync(ct);
         }
 
+        async Task StreamActivityAsync(object activityEvent)
+        {
+          var json = JsonSerializer.SerializeToUtf8Bytes(activityEvent);
+          await StreamText($":::[activity={Convert.ToBase64String(json)}]:::");
+        }
+
+        async Task StreamTextDeltaAsync(string text)
+        {
+          var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
+          await StreamText($":::[text={encoded}]:::");
+        }
+
+        async Task StreamErrorAsync(string error)
+        {
+          var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(error));
+          await StreamText($":::[error={encoded}]:::");
+        }
+
+        async Task<TrackedActivity> StartActivityAsync(string activityId, string kind, int outputIndex)
+        {
+          var fallbackId = $"{kind}-{outputIndex}";
+          activityId = string.IsNullOrWhiteSpace(activityId) ? fallbackId : activityId;
+          if (activitiesById.TryGetValue(activityId, out var existing)) return existing;
+          existing = activities.FirstOrDefault(o => o.Activity.Kind == kind && o.OutputIndex == outputIndex);
+          if (existing is not null)
+          {
+            activitiesById[activityId] = existing;
+            activitiesById[fallbackId] = existing;
+            return existing;
+          }
+
+          var activity = new TrackedActivity(activityId, kind, outputIndex);
+          activities.Add(activity);
+          activitiesById.Add(activityId, activity);
+          activitiesById[fallbackId] = activity;
+          await StreamActivityAsync(new { @event = "started", id = activityId, kind });
+          return activity;
+        }
+
+        async Task<TrackedActivity> CompleteActivityAsync(string activityId, string kind, int outputIndex)
+        {
+          var activity = await StartActivityAsync(activityId, kind, outputIndex);
+          if (activity.Completed) return activity;
+
+          activity.Stopwatch.Stop();
+          activity.Activity.DurationMs = activity.Stopwatch.ElapsedMilliseconds;
+          activity.Completed = true;
+          await StreamActivityAsync(new { @event = "completed", id = activity.Activity.Id, durationMs = activity.Activity.DurationMs });
+          return activity;
+        }
+
         async Task FinishStreamAsync(ResponseResult response, string textOverride = null)
         {
           var manualImageCost = 0m;
-          var sourcesMarkdown = textOverride is null ? GetSourcesMarkdown(response) : string.Empty;
-          var text = textOverride ?? (response.GetOutputText() + sourcesMarkdown);
+          var text = textOverride ?? response.GetOutputText();
           var images = textOverride is null ? GetGeneratedImages(response) : [];
           if (textOverride is null && imageModel is not null)
           {
-            foreach (var imagePrompt in GetImageGenerationPrompts(response))
+            foreach (var entry in response.OutputItems.Select((item, index) => (Item: item, Index: index)))
             {
-              await StreamText(":::[image_generation_in_progress]:::");
+              if (entry.Item is not FunctionCallResponseItem function || function.FunctionName != GenerateImageToolName) continue;
+              using var document = JsonDocument.Parse(function.FunctionArguments);
+              if (!document.RootElement.TryGetProperty("prompt", out var promptElement)) continue;
+              var imagePrompt = promptElement.GetString();
+              if (string.IsNullOrWhiteSpace(imagePrompt)) continue;
+
+              var imageActivity = await StartActivityAsync(function.Id ?? function.CallId, "image_generation", entry.Index);
               var generatedImage = await GenerateImageAsync(conversation.Preset.ImageModel, imagePrompt, id, ct);
-              await StreamText(":::[image_generation_completed]:::");
+              await CompleteActivityAsync(imageActivity.Activity.Id, "image_generation", entry.Index);
               images.Add(generatedImage.Image);
               manualImageCost += generatedImage.Cost;
             }
           }
-          if (!string.IsNullOrEmpty(sourcesMarkdown))
+
+          for (var outputIndex = 0; outputIndex < response.OutputItems.Count; outputIndex++)
           {
-            await StreamText(sourcesMarkdown);
+            switch (response.OutputItems[outputIndex])
+            {
+              case ReasoningResponseItem reasoningItem when conversation.Preset.ReasoningEffort is not ("none" or "minimal"):
+                var reasoningActivity = await StartActivityAsync(reasoningItem.Id, "reasoning", outputIndex);
+                if (string.IsNullOrEmpty(reasoningActivity.Activity.Summary))
+                {
+                  var summary = string.Join("\n\n", reasoningItem.SummaryParts
+                    .OfType<ReasoningSummaryTextPart>()
+                    .Select(o => o.Text)
+                    .Where(o => !string.IsNullOrWhiteSpace(o)));
+                  if (!string.IsNullOrWhiteSpace(summary))
+                  {
+                    reasoningActivity.Activity.Summary = summary;
+                    await StreamActivityAsync(new { @event = "summary_delta", id = reasoningActivity.Activity.Id, delta = summary });
+                  }
+                }
+                await CompleteActivityAsync(reasoningActivity.Activity.Id, "reasoning", outputIndex);
+                break;
+              case WebSearchCallResponseItem webSearchItem:
+                var webSearchActivity = await CompleteActivityAsync(webSearchItem.Id, "web_search", outputIndex);
+                switch (webSearchItem.Action)
+                {
+                  case WebSearchSearchAction searchAction:
+                    foreach (var source in (searchAction.Sources ?? []).OfType<WebSearchActionUriSource>())
+                      if (source.Uri is not null) webSearchActivity.WebSourceUris.Add(source.Uri.AbsoluteUri);
+                    break;
+                  case WebSearchOpenPageAction openPageAction when openPageAction.Uri is not null:
+                    webSearchActivity.WebSourceUris.Add(openPageAction.Uri.AbsoluteUri);
+                    break;
+                  case WebSearchFindInPageAction findInPageAction when findInPageAction.Uri is not null:
+                    webSearchActivity.WebSourceUris.Add(findInPageAction.Uri.AbsoluteUri);
+                    break;
+                }
+                break;
+              case FileSearchCallResponseItem fileSearchItem:
+                var fileSearchActivity = await CompleteActivityAsync(fileSearchItem.Id, "file_search", outputIndex);
+                foreach (var result in fileSearchItem.Results ?? [])
+                  if (!string.IsNullOrWhiteSpace(result.FileId)) fileSearchActivity.FileIds.Add(result.FileId);
+                break;
+              case ImageGenerationCallResponseItem imageItem:
+                await CompleteActivityAsync(imageItem.Id, "image_generation", outputIndex);
+                break;
+            }
           }
+
+          if (textOverride is null)
+          {
+            var uriCitations = new List<(UriCitationMessageAnnotation Citation, int OutputIndex)>();
+            var fileCitations = new List<(FileCitationMessageAnnotation Citation, int OutputIndex)>();
+            for (var outputIndex = 0; outputIndex < response.OutputItems.Count; outputIndex++)
+            {
+              if (response.OutputItems[outputIndex] is not MessageResponseItem message) continue;
+              foreach (var annotation in (message.Content ?? []).SelectMany(content => content.OutputTextAnnotations ?? []))
+              {
+                if (annotation is UriCitationMessageAnnotation uriCitation)
+                  uriCitations.Add((uriCitation, outputIndex));
+                else if (annotation is FileCitationMessageAnnotation fileCitation)
+                  fileCitations.Add((fileCitation, outputIndex));
+              }
+            }
+
+            foreach (var entry in uriCitations
+              .Where(o => o.Citation.Uri is not null && o.Citation.Uri.Scheme is "http" or "https"))
+            {
+              var uri = entry.Citation.Uri.AbsoluteUri;
+              var matches = activities
+                .Where(o => o.Activity.Kind == "web_search" && o.WebSourceUris.Contains(uri))
+                .OrderBy(o => o.OutputIndex)
+                .ToList();
+              var activity = matches.LastOrDefault(o => o.OutputIndex < entry.OutputIndex)
+                ?? matches.LastOrDefault()
+                ?? activities.Where(o => o.Activity.Kind == "web_search" && o.OutputIndex < entry.OutputIndex).MaxBy(o => o.OutputIndex)
+                ?? activities.LastOrDefault(o => o.Activity.Kind == "web_search");
+              if (activity is null) continue;
+              var title = string.IsNullOrWhiteSpace(entry.Citation.Title) ? uri : entry.Citation.Title;
+              activity.AddSource(uri, new ConversationActivitySource { Title = title, Uri = uri });
+            }
+
+            foreach (var entry in fileCitations)
+            {
+              var matches = activities
+                .Where(o => o.Activity.Kind == "file_search" && o.FileIds.Contains(entry.Citation.FileId))
+                .OrderBy(o => o.OutputIndex)
+                .ToList();
+              var activity = matches.LastOrDefault(o => o.OutputIndex < entry.OutputIndex)
+                ?? matches.LastOrDefault()
+                ?? activities.Where(o => o.Activity.Kind == "file_search" && o.OutputIndex < entry.OutputIndex).MaxBy(o => o.OutputIndex)
+                ?? activities.LastOrDefault(o => o.Activity.Kind == "file_search");
+              if (activity is null) continue;
+              var filename = string.IsNullOrWhiteSpace(entry.Citation.Filename) ? entry.Citation.FileId : entry.Citation.Filename;
+              var sourceKey = string.IsNullOrWhiteSpace(entry.Citation.FileId) ? filename : entry.Citation.FileId;
+              activity.AddSource(sourceKey, new ConversationActivitySource { Title = filename, Filename = filename });
+            }
+
+            foreach (var activity in activities.Where(o => (o.Activity.Sources?.Count ?? 0) > 0))
+              await StreamActivityAsync(new { @event = "sources", id = activity.Activity.Id, sources = activity.Activity.Sources });
+          }
+
           foreach (var image in images)
           {
             await StreamText($":::[image={image.Type};{image.Content}]:::");
@@ -303,34 +508,13 @@ public static class Api
             .Select(o => o.EncryptedContent)
             .Where(o => !string.IsNullOrWhiteSpace(o))
             .ToList();
-          var reasoningSummaries = new List<string>();
-          var consecutiveReasoningSummaries = new List<string>();
-          foreach (var item in response.OutputItems)
-          {
-            if (item is ReasoningResponseItem reasoningItem)
-            {
-              var summary = string.Join("\n\n", reasoningItem.SummaryParts
-                .OfType<ReasoningSummaryTextPart>()
-                .Select(o => o.Text)
-                .Where(o => !string.IsNullOrWhiteSpace(o)));
-              if (!string.IsNullOrWhiteSpace(summary))
-                consecutiveReasoningSummaries.Add(summary);
-            }
-            else if (consecutiveReasoningSummaries.Count > 0)
-            {
-              reasoningSummaries.Add(string.Join("\n\n", consecutiveReasoningSummaries));
-              consecutiveReasoningSummaries.Clear();
-            }
-          }
-          if (consecutiveReasoningSummaries.Count > 0)
-            reasoningSummaries.Add(string.Join("\n\n", consecutiveReasoningSummaries));
           conversation.Turns.Add(new()
           {
             Role = "assistant",
             Text = text,
             Images = images.Count > 0 ? images : null,
             EncryptedReasoningContent = encryptedReasoningContent.Count > 0 ? encryptedReasoningContent : null,
-            ReasoningSummaries = reasoningSummaries.Count > 0 ? reasoningSummaries : null
+            Activities = activities.Count > 0 ? activities.Select(o => o.Activity).ToList() : null
           });
           var responseCost = manualImageCost == 0 && images.Count > 0
             ? CalculateImageCost(imageModel, response.Usage, (userTurn.Images?.Count ?? 0) > 0)
@@ -360,18 +544,42 @@ public static class Api
               conversationEntity.Title = $"{FlagIcon} {conversationEntity.Title}";
             }
           }
-          var updateBlobTask = BlobService.CreateOrUpdateConversationAsync(id, conversation);
-          var recordSpendTask = TableService.RecordSpendAsync(userEmail, cost, userGroupName);
-          var updateEntityTask = TableService.UpsertConversationAsync(conversationEntity);
+          var spend = await TableService.RecordSpendAsync(userEmail, cost, userGroupName);
+          ct.ThrowIfCancellationRequested();
+
+          Task updateBlobTask;
+          if (isFirstTurn)
+          {
+            updateBlobTask = BlobService.CreateOrUpdateConversationAsync(id, conversation);
+          }
+          else
+          {
+            try
+            {
+              await BlobService.UpdateConversationAsync(id, conversation, conversationSnapshot,
+                () => TableService.UpdateConversationAsync(conversationEntity));
+            }
+            catch (RequestFailedException ex) when (ex.Status is 409 or 412)
+            {
+              await StreamErrorAsync("This conversation was updated elsewhere. Reload it and try again.");
+              return;
+            }
+            updateBlobTask = Task.CompletedTask;
+          }
+
+          var updateEntityTask = isFirstTurn
+            ? TableService.UpsertConversationAsync(conversationEntity)
+            : Task.CompletedTask;
           var reviewTask = isReviewer
             ? Task.CompletedTask
             : TableService.UpsertReviewEntityAsync(conversationEntity, userGroupName);
-          await Task.WhenAll(recordSpendTask, updateBlobTask, updateEntityTask, reviewTask);
-          var spendLimitReached = (await recordSpendTask) >= userGroup.UserMaxWeeklySpend;
+          await Task.WhenAll(updateBlobTask, updateEntityTask, reviewTask);
+          var spendLimitReached = spend >= userGroup.UserMaxWeeklySpend;
 
           if (isFirstTurn)
           {
-            await outputStream.WriteAsync(Encoding.UTF8.GetBytes($":::[conversation={id};{conversationEntity.Title}]:::"));
+            var conversationEvent = JsonSerializer.SerializeToUtf8Bytes(new { id, title = conversationEntity.Title });
+            await outputStream.WriteAsync(Encoding.UTF8.GetBytes($":::[conversation={Convert.ToBase64String(conversationEvent)}]:::"));
           }
           if (text == FlagToken)
           {
@@ -495,6 +703,7 @@ public static class Api
       decimal cost;
       ConversationEntity conversationEntity = null;
       Conversation conversation = null;
+      ConversationSnapshot conversationSnapshot = null;
       if (isFirstTurn)
       {
         id = Guid.NewGuid().ToString();
@@ -513,14 +722,14 @@ public static class Api
         title = summaryResponse.Title;
 
         conversationEntity = new ConversationEntity(userEmail, id, title, cost);
-        await TableService.UpsertConversationAsync(conversationEntity);
         conversation = new Conversation { Preset = preset };
       }
       else
       {
         id = entry.CurrentChatId;
         conversationEntity = await TableService.GetConversationAsync(userEmail, id);
-        conversation = await BlobService.GetConversationAsync(id);
+        conversationSnapshot = await BlobService.GetConversationSnapshotAsync(id);
+        conversation = conversationSnapshot.Conversation;
         if (!OpenAIConfig.Instance.Models.TryGetValue(conversation.Preset.Model, out var model))
         {
           model = OpenAIConfig.Instance.Models.Values.First();
@@ -529,13 +738,30 @@ public static class Api
         cost = CalculateSpeechCost(model, transcriptionModel, entry);
         var existingCost = decimal.Parse(conversationEntity.Cost, CultureInfo.InvariantCulture);
         conversationEntity.Cost = (existingCost + cost).ToString(CultureInfo.InvariantCulture);
-        await TableService.UpsertConversationAsync(conversationEntity);
       }
 
       conversation.Turns.Add(new ConversationTurn { Role = "user", Text = entry.UserTranscript, Timestamp = DateTime.UtcNow });
       conversation.Turns.Add(new ConversationTurn { Role = "assistant", Text = entry.AssistantTranscript, Timestamp = DateTime.UtcNow });
-      await BlobService.CreateOrUpdateConversationAsync(id, conversation);
       var spend = await TableService.RecordSpendAsync(userEmail, cost, userGroupName);
+      context.RequestAborted.ThrowIfCancellationRequested();
+      if (isFirstTurn)
+      {
+        await Task.WhenAll(
+          BlobService.CreateOrUpdateConversationAsync(id, conversation),
+          TableService.UpsertConversationAsync(conversationEntity));
+      }
+      else
+      {
+        try
+        {
+          await BlobService.UpdateConversationAsync(id, conversation, conversationSnapshot,
+            () => TableService.UpdateConversationAsync(conversationEntity));
+        }
+        catch (RequestFailedException ex) when (ex.Status is 409 or 412)
+        {
+          return Results.Conflict("This conversation was updated elsewhere. Reload it and try again.");
+        }
+      }
 
       return Results.Ok(new ChatResponse
       {
@@ -594,34 +820,6 @@ public static class Api
     };
   }
 
-  private static string GetSourcesMarkdown(ResponseResult response)
-  {
-    var uriCitations = response.OutputItems
-      .OfType<MessageResponseItem>()
-      .SelectMany(message => message.Content ?? [])
-      .SelectMany(content => content.OutputTextAnnotations ?? [])
-      .OfType<UriCitationMessageAnnotation>()
-      .DistinctBy(citation => citation.Uri)
-      .ToList();
-
-    if (uriCitations.Count == 0) return string.Empty;
-
-    var sources = new StringBuilder();
-    sources.AppendLine();
-    sources.AppendLine();
-    sources.AppendLine("### Sources");
-    foreach (var citation in uriCitations)
-    {
-      var title = string.IsNullOrWhiteSpace(citation.Title) ? citation.Uri.ToString() : citation.Title;
-      sources.Append("* [");
-      sources.Append(title);
-      sources.Append("](");
-      sources.Append(citation.Uri);
-      sources.AppendLine(")");
-    }
-    return sources.ToString();
-  }
-
   private static int CountWebSearchCalls(ResponseResult response)
   {
     return response.OutputItems.OfType<WebSearchCallResponseItem>().Count();
@@ -643,19 +841,6 @@ public static class Api
         Content = Convert.ToBase64String(item.ImageResultBytes.ToArray())
       })
       .ToList();
-  }
-
-  private static IEnumerable<string> GetImageGenerationPrompts(ResponseResult response)
-  {
-    return response.OutputItems
-      .OfType<FunctionCallResponseItem>()
-      .Where(item => item.FunctionName == GenerateImageToolName)
-      .Select(item =>
-      {
-        using var document = JsonDocument.Parse(item.FunctionArguments);
-        return document.RootElement.TryGetProperty("prompt", out var prompt) ? prompt.GetString() : null;
-      })
-      .Where(prompt => !string.IsNullOrWhiteSpace(prompt));
   }
 
   private static async Task<GeneratedConversationImage> GenerateImageAsync(string model, string prompt, string endUserId, CancellationToken ct)
@@ -739,6 +924,31 @@ public static class Api
   }
 
   private record GeneratedConversationImage(ConversationTurnImage Image, decimal Cost);
+
+  private class TrackedActivity
+  {
+    public TrackedActivity(string id, string kind, int outputIndex)
+    {
+      Activity = new() { Id = id, Kind = kind };
+      OutputIndex = outputIndex;
+    }
+
+    public ConversationActivity Activity { get; }
+    public Stopwatch Stopwatch { get; } = Stopwatch.StartNew();
+    public int OutputIndex { get; }
+    public int? SummaryIndex { get; set; }
+    public bool Completed { get; set; }
+    public HashSet<string> WebSourceUris { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> FileIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> SourceKeys { get; } = new(StringComparer.Ordinal);
+
+    public void AddSource(string key, ConversationActivitySource source)
+    {
+      if (string.IsNullOrWhiteSpace(key) || !SourceKeys.Add(key)) return;
+      Activity.Sources ??= [];
+      Activity.Sources.Add(source);
+    }
+  }
 
   private class GeneratedImageUsage
   {

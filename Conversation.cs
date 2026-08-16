@@ -37,14 +37,30 @@ public class Conversation
           {
             items.Add(new ReasoningResponseItem([]) { EncryptedContent = reasoning });
           }
+          var sourceLines = (turn.Activities ?? [])
+            .SelectMany(activity => activity.Sources ?? [])
+            .Select(source =>
+            {
+              var title = string.IsNullOrWhiteSpace(source.Title) ? source.Filename : source.Title;
+              if (string.IsNullOrWhiteSpace(source.Uri)) return title;
+              return string.IsNullOrWhiteSpace(title) || string.Equals(title, source.Uri, StringComparison.Ordinal)
+                ? source.Uri
+                : $"{title}: {source.Uri}";
+            })
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+          var assistantText = sourceLines.Count == 0
+            ? turn.Text
+            : $"{turn.Text}\n\nSources associated with this response:\n{string.Join("\n", sourceLines.Select(source => $"- {source}"))}";
           if ((turn.Images?.Count ?? 0) == 0)
           {
-            items.Add(ResponseItem.CreateAssistantMessageItem(turn.Text));
+            items.Add(ResponseItem.CreateAssistantMessageItem(assistantText));
             break;
           }
           var assistantParts = new List<ResponseContentPart>(turn.Images.Count + 1)
           {
-            ResponseContentPart.CreateOutputTextPart(turn.Text, [])
+            ResponseContentPart.CreateOutputTextPart(assistantText, [])
           };
           foreach (var image in turn.Images)
           {
@@ -73,10 +89,34 @@ public class ConversationTurn
   public IList<ConversationTurnFile> Files { get; set; }
   [JsonPropertyName("encryptedReasoningContent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public IList<string> EncryptedReasoningContent { get; set; }
-  [JsonPropertyName("reasoningSummaries"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-  public IList<string> ReasoningSummaries { get; set; }
+  [JsonPropertyName("activities"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public IList<ConversationActivity> Activities { get; set; }
   [JsonPropertyName("timestamp"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
   public DateTime? Timestamp { get; set; }
+}
+
+public class ConversationActivity
+{
+  [JsonPropertyName("id")]
+  public string Id { get; set; }
+  [JsonPropertyName("kind")]
+  public string Kind { get; set; }
+  [JsonPropertyName("durationMs")]
+  public long DurationMs { get; set; }
+  [JsonPropertyName("summary"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string Summary { get; set; }
+  [JsonPropertyName("sources"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public IList<ConversationActivitySource> Sources { get; set; }
+}
+
+public class ConversationActivitySource
+{
+  [JsonPropertyName("title")]
+  public string Title { get; set; }
+  [JsonPropertyName("uri"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string Uri { get; set; }
+  [JsonPropertyName("filename"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string Filename { get; set; }
 }
 
 public class ConversationTurnImage

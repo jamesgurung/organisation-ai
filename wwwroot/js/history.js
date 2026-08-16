@@ -1,3 +1,12 @@
+let activeHistoryController = null;
+let activeHistoryChatId = null;
+
+function cancelHistoryLoad() {
+  activeHistoryController?.abort();
+  activeHistoryController = null;
+  activeHistoryChatId = null;
+}
+
 function refreshHistoryUI() {
   historyContainer.innerHTML = '';
   history.forEach(chat => historyContainer.appendChild(createHistoryItem(chat)));
@@ -34,13 +43,35 @@ function createReviewItem(reviewEntity) {
 }
 
 async function loadChat(chatId, user, group) {
+  cancelHistoryLoad();
+  if (!user) replaceSelectionQuery('conversation', chatId);
+  else replaceSelectionQuery();
+  const controller = new AbortController();
+  activeHistoryController = controller;
+  activeHistoryChatId = chatId;
+  resetStreamingState();
   clearRenderedContent(chatContentContainer);
   welcomeMessage.style.display = 'none';
   document.querySelectorAll('.chat-list-item.active').forEach(chat => chat.classList.remove('active'));
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
-  const response = await fetch(group ? `/api/conversations/${group}/${chatId}` : `/api/conversations/${chatId}`);
-  const conversation = await response.json();
-  applyPreset(conversation.preset, !!user);
+  let conversation;
+  try {
+    const response = await fetch(group ? `/api/conversations/${group}/${chatId}` : `/api/conversations/${chatId}`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Conversation request failed with status ${response.status}.`);
+    conversation = await response.json();
+  } catch (error) {
+    if (error.name === 'AbortError' || activeHistoryController !== controller) return;
+    activeHistoryController = null;
+    activeHistoryChatId = null;
+    currentChatId = null;
+    document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.remove('active');
+    addErrorMessageToUI();
+    return;
+  }
+  if (activeHistoryController !== controller) return;
+  activeHistoryController = null;
+  activeHistoryChatId = null;
+  applyPreset(conversation.preset, !!user, false);
   currentChatId = chatId;
   document.getElementById(`${user ? 'review' : 'chat'}-${chatId}`)?.classList.add('active');
   conversation.turns.forEach(turn => addMessageToUI(turn, !user));
@@ -66,11 +97,13 @@ async function loadChat(chatId, user, group) {
 }
 
 async function deleteChat(chatId) {
+  const resetChat = chatId === currentChatId || chatId === activeHistoryChatId;
+  if (chatId === activeHistoryChatId) cancelHistoryLoad();
+  if (resetChat) startNewChat();
   document.getElementById(`chat-${chatId}`).remove();
   const index = history.findIndex(chat => chat.id === chatId);
   if (index !== -1) history.splice(index, 1);
   await fetch(`/api/conversations/${chatId}`, { method: 'DELETE', headers });
-  if (chatId === currentChatId) startNewChat();
 }
 
 function moveCurrentChatToTop() {
