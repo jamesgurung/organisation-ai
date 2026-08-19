@@ -43,6 +43,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
         "name": "gpt-5.6-sol",
         "costPer1MInputTokens": 5.00,
         "costPer1MCachedInputTokens": 0.50,
+        "costPer1MCacheWriteTokens": 6.25,
         "costPer1MImageInputTokens": null,
         "costPer1MImageCachedInputTokens": null,
         "costPer1MImageOutputTokens": null,
@@ -56,7 +57,7 @@ Originally known as *Teacher AI* for its focus on supporting staff in schools, t
     ]
     ```
 
-    If a preset enables web search, the selected model must include `costPer1KWebSearchCalls`. If a preset enables file search by setting `vectorStore`, the selected model must include `costPer1KFileSearchCalls`.
+    `costPer1MCacheWriteTokens` is optional; if it is omitted or `null`, cache writes are billed at the model's normal input token rate. If a preset enables web search, the selected model must include `costPer1KWebSearchCalls`. If a preset enables file search by setting `vectorStore`, the selected model must include `costPer1KFileSearchCalls`.
 
 5. Within the `config` blob container, create a file `users.csv` with the following format:
 

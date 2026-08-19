@@ -5,6 +5,7 @@ public class OpenAIModelConfig
   public string Name { get; init; }
   public decimal CostPer1MInputTokens { get; init; }
   public decimal CostPer1MCachedInputTokens { get; init; }
+  public decimal? CostPer1MCacheWriteTokens { get; init; }
   public decimal CostPer1MOutputTokens { get; init; }
   public decimal? CostPer1MImageInputTokens { get; init; }
   public decimal? CostPer1MImageCachedInputTokens { get; init; }

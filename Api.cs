@@ -873,8 +873,10 @@ public static class Api
 #if DEBUG
     return 0;
 #else
-    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
+    var cacheWriteTokenCount = usage.InputTokenDetails.Patch.TryGetValue("$.cache_write_tokens"u8, out int value) ? value : 0;
+    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount - cacheWriteTokenCount) * model.CostPer1MInputTokens / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * model.CostPer1MCachedInputTokens / 1_000_000m) +
+           (cacheWriteTokenCount * (model.CostPer1MCacheWriteTokens ?? model.CostPer1MInputTokens) / 1_000_000m) +
            (usage.OutputTokenCount * model.CostPer1MOutputTokens / 1_000_000m) +
            (webSearchCallCount * (model.CostPer1KWebSearchCalls ?? 0) / 1_000m) +
            (fileSearchCallCount * (model.CostPer1KFileSearchCalls ?? 0) / 1_000m);
@@ -888,9 +890,11 @@ public static class Api
 #else
     var inputCost = hasInputImage ? model.CostPer1MImageInputTokens ?? model.CostPer1MInputTokens : model.CostPer1MInputTokens;
     var cachedInputCost = hasInputImage ? model.CostPer1MImageCachedInputTokens ?? model.CostPer1MCachedInputTokens : model.CostPer1MCachedInputTokens;
+    var cacheWriteTokenCount = usage.InputTokenDetails.Patch.TryGetValue("$.cache_write_tokens"u8, out int value) ? value : 0;
     var outputCost = model.CostPer1MImageOutputTokens ?? model.CostPer1MOutputTokens;
-    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount) * inputCost / 1_000_000m) +
+    return ((usage.InputTokenCount - usage.InputTokenDetails.CachedTokenCount - cacheWriteTokenCount) * inputCost / 1_000_000m) +
            (usage.InputTokenDetails.CachedTokenCount * cachedInputCost / 1_000_000m) +
+           (cacheWriteTokenCount * (model.CostPer1MCacheWriteTokens ?? inputCost) / 1_000_000m) +
            (usage.OutputTokenCount * outputCost / 1_000_000m);
 #endif
   }
