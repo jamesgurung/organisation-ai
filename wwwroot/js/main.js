@@ -48,9 +48,10 @@ const headers = { 'X-XSRF-TOKEN': antiforgeryToken };
 
 let isScrolledToBottom = true;
 let mathIndex = 0;
-const renderedPlainText = new WeakMap();
-const streamingTextAnimations = new WeakMap();
-const streamingAnimationDuration = 600;
+const streamingRenderers = new WeakMap();
+const activeStreamingRenderers = new Set();
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const streamingAnimationDuration = 450;
 
 marked.use({
   extensions: [{
@@ -203,96 +204,298 @@ async function typesetMath(elements) {
   }
 }
 
-async function renderMarkdown(element, markdown, streaming = false) {
-  const renderedMath = new Map(Array.from(element.querySelectorAll('[data-math-index]'), math =>
-    [math.dataset.mathIndex, math]));
-  const template = document.createElement('template');
-  template.innerHTML = markdownToHtml(markdown);
-  const previousText = renderedPlainText.get(element) ?? '';
-  const nextText = (template.content.textContent ?? '').trimEnd();
-  const newMath = [];
-
-  if (streaming && nextText.startsWith(previousText)) {
-    const now = performance.now();
-    const animations = (streamingTextAnimations.get(element) ?? [])
-      .filter(animation => now - animation.startedAt < streamingAnimationDuration + animation.delay);
-    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
-    let offset = 0;
-    let animationIndex = 0;
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      const start = offset;
-      offset += node.textContent.length;
-      if (node.parentElement?.closest('pre, code, .math-content, mjx-container, script, style')) continue;
-      textNodes.push({ node, start, end: offset });
-    }
-
-    textNodes.forEach(({ node, start, end }) => {
-      const splitIndex = Math.max(0, previousText.length - start);
-      if (end <= previousText.length) return;
-      Array.from(node.textContent.substring(splitIndex).matchAll(/\S+/g)).forEach(match => {
-        const animationStart = start + splitIndex + match.index;
-        animations.push({
-          start: animationStart,
-          end: animationStart + match[0].length,
-          startedAt: now,
-          delay: Math.min(animationIndex++ * 24, 120)
-        });
-      });
-    });
-
-    textNodes.forEach(({ node, start, end }) => {
-      const nodeAnimations = animations
-        .filter(animation => animation.end > start && animation.start < end)
-        .sort((left, right) => left.start - right.start);
-      if (nodeAnimations.length === 0) return;
-      const fragment = document.createDocumentFragment();
-      let cursor = 0;
-      nodeAnimations.forEach(animation => {
-        const animationStart = Math.max(0, animation.start - start);
-        const animationEnd = Math.min(node.textContent.length, animation.end - start);
-        if (animationStart > cursor)
-          fragment.appendChild(document.createTextNode(node.textContent.substring(cursor, animationStart)));
-        const span = document.createElement('span');
-        span.className = 'streaming-text-fragment';
-        span.style.animationDelay = `${animation.delay - (now - animation.startedAt)}ms`;
-        span.textContent = node.textContent.substring(animationStart, animationEnd);
-        fragment.appendChild(span);
-        cursor = animationEnd;
-      });
-      if (cursor < node.textContent.length)
-        fragment.appendChild(document.createTextNode(node.textContent.substring(cursor)));
-      node.replaceWith(fragment);
-    });
-    streamingTextAnimations.set(element, animations);
-  } else {
-    streamingTextAnimations.delete(element);
-  }
-
-  template.content.querySelectorAll('[data-math-index]').forEach(math => {
-    const rendered = renderedMath.get(math.dataset.mathIndex);
-    if (rendered) math.replaceWith(rendered);
-    else newMath.push(math);
-  });
-
-  element.replaceChildren(template.content);
-  renderedPlainText.set(element, nextText);
-  await typesetMath(newMath);
-  if (streaming && (streamingTextAnimations.get(element)?.length ?? 0) > 0 &&
-    !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-    await new Promise(resolve => setTimeout(resolve, 16));
+async function renderMarkdown(element, markdown) {
+  clearRenderedContent(element);
+  element.innerHTML = markdownToHtml(markdown);
+  await typesetMath(element.querySelectorAll('[data-math-index]'));
 }
 
+function updateStreamingMarkdown(element, markdown, animate = true) {
+  let state = streamingRenderers.get(element);
+  const source = markdown.replace(/\r\n?/g, '\n');
+  if (state && !source.startsWith(state.source)) {
+    clearRenderedContent(element);
+    state = null;
+  }
+  if (!state) {
+    state = {
+      element, source: '', offset: 0, drawn: 0, blocks: [], fragments: [],
+      links: {}, linkRevision: 0, animations: new Set(), renders: new Set(), frame: null,
+      ended: false, cancelled: false, completion: null, animate,
+      draft: document.createElement('div')
+    };
+    state.draft.className = 'streaming-draft';
+    element.appendChild(state.draft);
+    streamingRenderers.set(element, state);
+  }
+  if (state.ended && source !== state.source) {
+    state.completion?.resolve();
+    state.completion = null;
+    state.ended = false;
+  }
+  state.source = source;
+  state.animate = animate;
+  if (!state.draft.isConnected) element.appendChild(state.draft);
+  activeStreamingRenderers.add(state);
+  if (!animate || reducedMotion.matches)
+    state.animations.forEach(animation => animation.finish());
+  scheduleStreamingRender(state);
+}
+
+function scheduleStreamingRender(state) {
+  if (state.cancelled) return;
+  if (!state.animate || reducedMotion.matches) {
+    if (state.frame !== null) cancelAnimationFrame(state.frame);
+    state.frame = null;
+    flushStreamingRender(state);
+    return;
+  }
+  if (document.hidden || state.frame !== null) return;
+  state.frame = requestAnimationFrame(() => {
+    state.frame = null;
+    flushStreamingRender(state);
+  });
+}
+
+function getStreamingBlocks(source, ended) {
+  const tokens = marked.lexer(source);
+  const blocks = [];
+  let offset = 0;
+  let start = 0;
+  let mathClose = null;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    // Keep an unfinished line's indentation in the tail for the next chunk.
+    const raw = token.type === 'space' && !ended
+      ? token.raw.slice(0, token.raw.lastIndexOf('\n') + 1)
+      : token.raw;
+    offset += raw.length;
+    if (token.type !== 'code') {
+      const text = token.raw.replace(/(`+)[\s\S]*?\1/g, '');
+      for (const match of text.matchAll(/(?<!\\)(?:\\\\)*\\([()[\]])/g)) {
+        if (!mathClose && (match[1] === '(' || match[1] === '['))
+          mathClose = match[1] === '(' ? ')' : ']';
+        else if (match[1] === mathClose) mathClose = null;
+      }
+    }
+    const space = tokens[index + 1]?.type === 'space' ? tokens[index + 1].raw : '';
+    const separator = ended ? space : space.slice(0, space.lastIndexOf('\n') + 1);
+    const nextIndex = index + (space ? 2 : 1);
+    const next = tokens[nextIndex];
+    const nextSeparator = tokens[nextIndex + 1]?.type === 'space' ? tokens[nextIndex + 1].raw : '';
+    const lineEnded = raw.endsWith('\n') || separator.startsWith('\n');
+    const fence = /^ {0,3}(`{3,}|~{3,})[^\n]*\n/.exec(token.raw);
+    const closedFence = token.type === 'code' && fence && lineEnded &&
+      new RegExp(`\\n {0,3}${fence[1][0]}{${fence[1].length},}[ \\t]*\\n$`).test(raw.endsWith('\n') ? raw : `${raw}\n`);
+    const complete = ended || closedFence ||
+      (['heading', 'hr', 'space'].includes(token.type) && lineEnded) ||
+      (['paragraph', 'def'].includes(token.type) && /\n[ \t]*\n/.test(separator || raw.slice(-2))) ||
+      (next && /\n/.test(next.raw + nextSeparator));
+    if (!complete) break;
+    if (separator) {
+      offset += separator.length;
+      index++;
+    }
+    if (mathClose && !ended) continue;
+    blocks.push({ start, end: offset });
+    start = offset;
+  }
+  return blocks;
+}
+
+function flushStreamingRender(state) {
+  if (state.cancelled) return;
+  const animate = state.animate && !reducedMotion.matches;
+  if (document.hidden && animate) return;
+  let drawEnd = state.source.length;
+  // A transport chunk can split a UTF-16 surrogate pair.
+  if (!state.ended && /[\uD800-\uDBFF]/.test(state.source.at(-1) ?? '')) drawEnd--;
+  let animationIndex = 0;
+  for (const match of state.source.slice(state.drawn, drawEnd).matchAll(/\n|[^\S\n]+|\S+/gu)) {
+    const text = match[0];
+    const node = animate && /\S/.test(text) ? document.createElement('span') : document.createTextNode(text);
+    node.textContent = text;
+    const fragment = { node, start: state.drawn + match.index, end: state.drawn + match.index + text.length, animation: null };
+    state.fragments.push(fragment);
+    state.draft.appendChild(node);
+    if (!animate || !/\S/.test(text)) continue;
+    node.className = 'streaming-text-fragment';
+    const animation = node.animate([
+      { filter: 'blur(4px)', opacity: 0 },
+      { filter: 'blur(0)', opacity: 1 }
+    ], {
+      duration: streamingAnimationDuration,
+      // Preserve the original reveal, trimming its nearly settled final 150ms.
+      easing: 'cubic-bezier(0.2565, 0.5433, 0.3193, 0.9153)',
+      delay: Math.min(animationIndex++ * 18, 90),
+      fill: 'both'
+    });
+    fragment.animation = animation;
+    state.animations.add(animation);
+    animation.finished.then(() => {
+      fragment.animation = null;
+      state.animations.delete(animation);
+      fragment.node = document.createTextNode(node.textContent);
+      node.replaceWith(fragment.node);
+      animation.cancel();
+      if (!state.cancelled) scheduleStreamingRender(state);
+    }, () => {});
+  }
+  state.drawn = drawEnd;
+
+  const ranges = getStreamingBlocks(state.source.slice(state.offset, drawEnd), state.ended);
+  const base = state.offset;
+  for (const range of ranges) {
+    const end = base + range.end;
+    const crossing = state.fragments.find(fragment => fragment.start < end && fragment.end > end);
+    // Do not split or replace a fragment while its entrance is still running.
+    if (crossing?.animation) break;
+    if (crossing) {
+      const remainder = document.createTextNode(crossing.node.textContent.slice(end - crossing.start));
+      crossing.node.textContent = crossing.node.textContent.slice(0, end - crossing.start);
+      crossing.node.after(remainder);
+      state.fragments.splice(state.fragments.indexOf(crossing) + 1, 0,
+        { node: remainder, start: end, end: crossing.end, animation: null });
+      crossing.end = end;
+    }
+    const element = document.createElement('div');
+    element.className = 'streaming-draft';
+    state.draft.before(element);
+    const fragments = state.fragments.filter(fragment => fragment.end <= end);
+    fragments.forEach(fragment => element.appendChild(fragment.node));
+    state.fragments = state.fragments.filter(fragment => fragment.end > end);
+    const source = state.source.slice(state.offset, end);
+    const block = { source, element, fragments, nodes: [element], html: null, rendering: false };
+    state.blocks.push(block);
+    state.offset = end;
+    // Paragraph separators belong to the source, but spacing belongs to CSS.
+    for (const fragment of [...fragments].reverse()) {
+      fragment.node.textContent = fragment.node.textContent.trimEnd();
+      if (fragment.node.textContent) break;
+    }
+    const definitions = marked.lexer(source).links;
+    for (const [key, value] of Object.entries(definitions)) {
+      if (Object.hasOwn(state.links, key)) continue;
+      state.links[key] = value;
+      state.linkRevision++;
+    }
+  }
+
+  for (const block of state.blocks) {
+    if (block.rendering || block.fragments.some(fragment => fragment.animation)) continue;
+    if (block.html !== null && block.linkRevision === state.linkRevision) continue;
+    block.linkRevision = state.linkRevision;
+    mathIndex = 0;
+    const lexer = new marked.Lexer();
+    lexer.tokens.links = { ...state.links };
+    const html = marked.parser(lexer.lex(block.source)).replace(/<a /g, '<a target="_blank" rel="noreferrer" ');
+    if (html === block.html) continue;
+    const render = renderStreamingBlock(state, block, html);
+    state.renders.add(render);
+    render.catch(error => {
+      console.error('Streaming Markdown rendering failed.', error);
+      cancelStreamingMarkdown(state.element, true);
+    }).finally(() => {
+      state.renders.delete(render);
+      if (!state.cancelled) scheduleStreamingRender(state);
+    });
+  }
+  if (state.ended && state.drawn === state.source.length && state.offset === state.drawn &&
+    state.animations.size === 0 && state.renders.size === 0) {
+    state.draft.remove();
+    activeStreamingRenderers.delete(state);
+    state.completion?.resolve();
+  }
+  scrollChatContainer();
+}
+
+async function renderStreamingBlock(state, block, html) {
+  block.rendering = true;
+  block.html = html;
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  wrapTables(container);
+  const math = Array.from(container.querySelectorAll('[data-math-index]'));
+  const nodes = Array.from(container.childNodes);
+  // A marker keeps even invisible definition blocks addressable for later references.
+  if (nodes.length === 0) nodes.push(document.createComment('markdown'));
+  const anchor = isScrolledToBottom ? null : Array.from(chatContentContainer.querySelectorAll('p, pre, li, .streaming-draft'))
+    .find(element => !block.nodes.some(node => node === element || node.contains(element)) &&
+      element.getBoundingClientRect().bottom > chatContainer.getBoundingClientRect().top);
+  const top = anchor?.getBoundingClientRect().top;
+  block.nodes[0].before(...nodes);
+  block.nodes.forEach(node => {
+    if (node.nodeType === Node.ELEMENT_NODE) MathJax.typesetClear?.([node]);
+    node.remove();
+  });
+  block.nodes = nodes;
+  block.fragments = [];
+  if (anchor?.isConnected) chatContainer.scrollTop += anchor.getBoundingClientRect().top - top;
+  scrollChatContainer();
+  await typesetMath(math);
+  if (state.cancelled) {
+    MathJax.typesetClear?.(math);
+    return;
+  }
+  if (anchor?.isConnected && !isScrolledToBottom)
+    chatContainer.scrollTop += anchor.getBoundingClientRect().top - top;
+  block.rendering = false;
+  scrollChatContainer();
+}
+
+function finishStreamingMarkdown(element) {
+  const state = streamingRenderers.get(element);
+  if (!state || state.cancelled) return Promise.resolve();
+  state.ended = true;
+  state.completion ??= Promise.withResolvers();
+  activeStreamingRenderers.add(state);
+  scheduleStreamingRender(state);
+  return state.completion.promise;
+}
+
+function cancelStreamingMarkdown(element, preserve = false) {
+  for (const state of activeStreamingRenderers) {
+    if (state.element !== element && !element?.contains(state.element)) continue;
+    state.cancelled = true;
+    if (state.frame !== null) cancelAnimationFrame(state.frame);
+    state.animations.forEach(animation => animation.cancel());
+    state.animations.clear();
+    state.completion?.resolve();
+    streamingRenderers.delete(state.element);
+    activeStreamingRenderers.delete(state);
+    if (preserve) {
+      MathJax.typesetClear?.([state.element]);
+      state.element.innerHTML = markdownToHtml(state.source);
+      wrapTables(state.element);
+      typesetMath(state.element.querySelectorAll('[data-math-index]'));
+    }
+  }
+}
+
+function updateStreamingVisibility() {
+  for (const state of activeStreamingRenderers) {
+    for (const animation of state.animations) {
+      if (reducedMotion.matches || !state.animate) animation.finish();
+      else if (document.hidden) animation.pause();
+      else animation.play();
+    }
+    scheduleStreamingRender(state);
+  }
+}
+
+document.addEventListener('visibilitychange', updateStreamingVisibility);
+reducedMotion.addEventListener('change', updateStreamingVisibility);
+
 function clearRenderedContent(element) {
+  cancelStreamingMarkdown(element);
+  streamingRenderers.delete(element);
   if (element.hasChildNodes()) MathJax.typesetClear?.([element]);
-  renderedPlainText.delete(element);
-  streamingTextAnimations.delete(element);
   element.replaceChildren();
 }
 
 function wrapTables(el) {
   el.querySelectorAll('table').forEach(table => {
+    if (table.parentElement.classList.contains('table-wrapper')) return;
     const wrapper = document.createElement('div');
     wrapper.className = 'table-wrapper';
     table.parentNode.insertBefore(wrapper, table);

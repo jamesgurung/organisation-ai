@@ -109,8 +109,7 @@ function clearActivityTimers(interrupt = false) {
     entry.activeIds.clear();
     entry.interrupted = true;
     updateActivityHeader(entry);
-    if (!entry.manuallyToggled) setActivityExpanded(entry, false);
-    entry.renderPromise = renderActivityDetails(entry);
+    renderActivityDetails(entry);
   });
 }
 
@@ -120,6 +119,8 @@ function setActivityExpanded(entry, expanded) {
   entry.details.setAttribute('aria-hidden', String(!expanded));
   entry.details.inert = !expanded;
   entry.element.classList.toggle('expanded', expanded);
+  if (entry.live && entry.summaryElement)
+    updateStreamingMarkdown(entry.summaryElement, entry.activity.summary, expanded);
 }
 
 function updateActivityDisclosure(entry, hasDetails) {
@@ -135,7 +136,13 @@ function collapseActivitiesForOutput() {
   if (activitiesCollapsedForOutput) return;
   activitiesCollapsedForOutput = true;
   new Set(currentResponseActivities.values()).forEach(entry => {
-    if (!entry.active && !entry.manuallyToggled) setActivityExpanded(entry, false);
+    if (entry.active || entry.manuallyToggled) return;
+    const generation = streamingGeneration;
+    const revision = entry.renderRevision;
+    Promise.resolve(entry.renderPromise).then(() => {
+      if (generation === streamingGeneration && revision === entry.renderRevision && !entry.active && !entry.manuallyToggled)
+        setActivityExpanded(entry, false);
+    });
   });
 }
 
@@ -197,6 +204,7 @@ function createActivityElement(activity, active = false) {
     details,
     detailsInner,
     summaryElement: null,
+    renderRevision: 0,
     live: active,
     active,
     interrupted: false,
@@ -249,7 +257,20 @@ async function renderActivityDetails(entry) {
       entry.summaryElement.className = 'activity-summary';
       entry.detailsInner.appendChild(entry.summaryElement);
     }
-    await renderMarkdown(entry.summaryElement, summary, entry.active);
+    if (entry.live) {
+      const revision = ++entry.renderRevision;
+      const generation = streamingGeneration;
+      updateStreamingMarkdown(entry.summaryElement, summary, entry.expanded && !entry.interrupted);
+      if (!entry.active) {
+        entry.renderPromise = finishStreamingMarkdown(entry.summaryElement).then(() => {
+          if (generation === streamingGeneration && revision === entry.renderRevision &&
+            (activitiesCollapsedForOutput || entry.interrupted) && !entry.active && !entry.manuallyToggled)
+            setActivityExpanded(entry, false);
+        });
+      }
+    } else {
+      await renderMarkdown(entry.summaryElement, summary);
+    }
     return;
   }
 
@@ -318,9 +339,11 @@ async function ensureLiveActivity(activity) {
     entry.activeIds.add(activity.id);
     if (!entry.active) {
       entry.active = true;
+      entry.renderRevision++;
       entry.interrupted = false;
       entry.timerId = startActivityTimer(entry.timer, performance.now() - entry.activity.durationMs);
       updateActivityHeader(entry);
+      if (entry.hasDetails && !entry.manuallyToggled) setActivityExpanded(entry, true);
     }
     return entry;
   }
@@ -372,7 +395,6 @@ async function processActivityEvent(activityEvent) {
   stopActivityTimer(entry.timerId);
   entry.timerId = null;
   updateActivityHeader(entry);
-  if (activitiesCollapsedForOutput && !entry.manuallyToggled) setActivityExpanded(entry, false);
   await renderActivityDetails(entry);
 }
 
@@ -394,6 +416,7 @@ function getCurrentResponseActivities() {
 }
 
 function resetStreamingState(abortStream = true) {
+  cancelStreamingMarkdown(currentResponseElement, true);
   streamingGeneration++;
   if (abortStream) currentStreamController?.abort();
   currentStreamReader?.cancel().catch(() => {});
@@ -459,8 +482,14 @@ async function streamResponse(response, generation) {
       await processChunk(buffer);
       if (generation !== streamingGeneration) return;
     }
+    clearActivityTimers(true);
+    const renders = Array.from(new Set(currentResponseActivities.values()), entry => entry.renderPromise);
     if (textContainer && !currentResponseElement.classList.contains('error') && !currentResponseElement.classList.contains('stop'))
-      await renderMarkdown(textContainer, currentResponseMarkdown);
+      renders.push(finishStreamingMarkdown(textContainer));
+    await Promise.all(renders);
+  } catch (error) {
+    if (generation === streamingGeneration) cancelStreamingMarkdown(currentResponseElement, true);
+    throw error;
   } finally {
     if (generation === streamingGeneration) {
       currentStreamReader = null;
@@ -498,6 +527,7 @@ async function processChunk(chunk, framed = false) {
         spendLimitReached = true;
         break;
       case '[flagged]':
+        cancelStreamingMarkdown(currentResponseElement, true);
         clearActivityTimers(true);
         showStopMessage(currentResponseElement, stopCommands.find(o => o.token === '[FLAG]'));
         break;
@@ -526,6 +556,7 @@ async function processChunk(chunk, framed = false) {
           break;
         }
         if (chunk.startsWith('[error=')) {
+          cancelStreamingMarkdown(currentResponseElement, true);
           clearActivityTimers(true);
           currentResponseElement.classList.add('error');
           if (!textContainer) {
@@ -563,10 +594,11 @@ async function appendResponseText(chunk) {
 
   const stopCommand = stopCommands.find(({ token }) => currentResponseMarkdown.includes(token));
   if (stopCommand) {
+    cancelStreamingMarkdown(currentResponseElement, true);
     clearActivityTimers(true);
     showStopMessage(currentResponseElement, stopCommand);
   } else {
-    await renderMarkdown(textContainer, currentResponseMarkdown, true);
+    updateStreamingMarkdown(textContainer, currentResponseMarkdown);
   }
 }
 

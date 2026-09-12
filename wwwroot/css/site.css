@@ -1057,9 +1057,23 @@ a.activity-source:focus-visible {
   font-size: 12px;
 }
 
+.streaming-draft {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.streaming-draft:empty {
+  display: none;
+}
+
+.activity-summary .streaming-draft {
+  font-size: inherit;
+  margin-bottom: 7px;
+}
+
 .streaming-text-fragment {
-  display: inline-block;
-  animation: streaming-text-in 0.6s cubic-bezier(0.22, 0.61, 0.25, 1) var(--streaming-delay, 0ms) both;
   will-change: filter, opacity;
 }
 
