@@ -1,5 +1,6 @@
 let activeHistoryController = null;
 let activeHistoryChatId = null;
+let isResolvingReviews = false;
 
 function cancelHistoryLoad() {
   activeHistoryController?.abort();
@@ -30,8 +31,14 @@ function createHistoryItem(conversationEntity) {
 }
 
 function refreshReviewUI() {
+  const activeId = reviewContainer.querySelector('.active')?.id;
   reviewContainer.innerHTML = '';
   reviewItems.forEach(reviewEntity => reviewContainer.appendChild(createReviewItem(reviewEntity)));
+  if (activeId) document.getElementById(activeId)?.classList.add('active');
+  reviewBadge.textContent = reviewItems.length;
+  reviewBadge.style.display = reviewItems.length > 0 ? 'block' : 'none';
+  if (reviewItems.length > 0)
+    reviewContainer.appendChild(createListItem('Clear review queue', clearReviewQueue));
 }
 
 function createReviewItem(reviewEntity) {
@@ -87,6 +94,7 @@ async function loadChat(chatId, user, group) {
     const resolveBtn = document.createElement('button');
     resolveBtn.className = 'resolve';
     resolveBtn.textContent = 'Resolve';
+    resolveBtn.disabled = isResolvingReviews;
     resolveBtn.addEventListener('click', async e => {
       e.stopPropagation();
       await resolveReviewItem(group);
@@ -113,23 +121,63 @@ function moveCurrentChatToTop() {
 }
 
 async function resolveReviewItem(group) {
+  if (isResolvingReviews) return;
+  isResolvingReviews = true;
+  const chatId = currentChatId;
   document.querySelector('.resolve').disabled = true;
-  const response = await fetch(`/api/conversations/${group}/${currentChatId}/resolve`, { method: 'POST', headers });
-  if (!response.ok) {
+  try {
+    const response = await fetch(`/api/conversations/${group}/${chatId}/resolve`, { method: 'POST', headers });
+    if (!response.ok) throw new Error('Review resolution failed.');
+    const index = reviewItems.findIndex(item => item.id === chatId && item.group === group);
+    const wasActive = reviewContainer.querySelector('.active')?.id === `review-${chatId}`;
+    if (index !== -1) reviewItems.splice(index, 1);
+    const nextItem = reviewItems[index] || reviewItems[index - 1];
+    refreshReviewUI();
+    if (!wasActive) return;
+    if (nextItem) {
+      await loadChat(nextItem.id, nextItem.user, nextItem.group);
+      return;
+    }
+    switchTab('presets');
+    startNewChat();
+  } catch {
     alert('Failed to resolve review item.');
-    return;
+  } finally {
+    isResolvingReviews = false;
+    const resolveBtn = document.querySelector('.resolve');
+    if (resolveBtn) resolveBtn.disabled = false;
   }
-  const reviewItem = document.getElementById(`review-${currentChatId}`);
-  const nextItem = reviewItem.nextElementSibling || reviewItem.previousElementSibling;
-  reviewItem.remove();
-  if (nextItem) {
-    const nextId = nextItem.id.replace('review-', '');
-    reviewBadge.textContent = parseInt(reviewBadge.textContent, 10) - 1;
-    await loadChat(nextId, nextItem.dataset.user, nextItem.dataset.group);
-    return;
-  }
+}
 
-  reviewBadge.style.display = 'none';
-  switchTab('presets');
-  startNewChat();
+async function clearReviewQueue() {
+  if (isResolvingReviews || reviewItems.length === 0) return;
+  isResolvingReviews = true;
+  const resolveBtn = document.querySelector('.resolve');
+  if (resolveBtn) resolveBtn.disabled = true;
+  try {
+    const items = [...reviewItems];
+    const results = await Promise.allSettled(items.map(async item => {
+      const response = await fetch(`/api/conversations/${item.group}/${item.id}/resolve`, { method: 'POST', headers });
+      if (!response.ok) throw new Error('Review resolution failed.');
+    }));
+    const activeId = reviewContainer.querySelector('.active')?.id;
+    let resetChat = false;
+    results.forEach((result, index) => {
+      if (result.status !== 'fulfilled') return;
+      const item = items[index];
+      if (activeId === `review-${item.id}`) resetChat = true;
+      reviewItems.splice(reviewItems.indexOf(item), 1);
+    });
+    refreshReviewUI();
+    if (resetChat) {
+      switchTab('presets');
+      startNewChat();
+    }
+    if (results.some(result => result.status === 'rejected'))
+      alert('Failed to resolve some review items. Please try again.');
+  } finally {
+    isResolvingReviews = false;
+    const resolveBtn = document.querySelector('.resolve');
+    if (resolveBtn) resolveBtn.disabled = false;
+  }
 }
