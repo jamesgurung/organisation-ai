@@ -4,7 +4,7 @@
     <TargetFramework>net11.0</TargetFramework>
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AnalysisMode>All</AnalysisMode>
+    <AnalysisMode>Recommended</AnalysisMode>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>.</DockerfileContext>
     <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
@@ -19,7 +19,7 @@
     <PackageReference Include="Azure.Storage.Blobs" Version="12.30.1" />
     <PackageReference Include="LigerShark.WebOptimizer.Core" Version="3.0.477" />
     <PackageReference Include="Microsoft.Azure.AppConfiguration.AspNetCore" Version="8.7.0-preview" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="11.0.0-rc.2.26504.105" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="11.0.0-rc.3.26522.148" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" Version="3.0.114" />
     <PackageReference Include="OpenAI" Version="2.14.0" />

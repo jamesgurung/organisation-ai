@@ -3,14 +3,14 @@
   "defaultProvider": "jsdelivr",
   "libraries": [
     {
-      "library": "marked@18.0.9",
+      "library": "marked@18.1.1",
       "destination": "wwwroot/lib/marked/",
       "files": [
         "lib/marked.umd.min.js"
       ]
     },
     {
-      "library": "chart.js@4.5.1",
+      "library": "chart.js@4.6.1",
       "destination": "wwwroot/lib/chart.js/",
       "files": [
         "dist/chart.umd.min.js"
